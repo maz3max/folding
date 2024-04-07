@@ -56,6 +56,20 @@ Aff_transformation_3 getFallingDownTransformation(const Point_3 &facetPoint, con
   return translate * rotate;
 }
 
+/*
+Idea:
+
+A spanning tree (dual to a cut tree) is generated using steepest edge cut first.
+After that, the polyhedron is unfolded along the spanning tree:
+
+1. Find the facet that is facing down most (normal vector is closest to (0, 0, -1))
+2. Use getFallingDownTransformation to get the transformation that makes the facet fall down
+3. Along the spanning tree, each facet inherits the transformation from its parent
+4. Additionally, each facet is rotated around the common edge with its parent
+
+Lastly, intersections between facets are checked. The process is repeated until no intersections are found.
+*/
+
 int main(int argc, char *argv[])
 {
   Polyhedron P;
