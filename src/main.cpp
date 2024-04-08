@@ -9,7 +9,6 @@
 typedef CGAL::Exact_predicates_inexact_constructions_kernel Kernel;
 typedef CGAL::Polyhedron_3<Kernel> Polyhedron;
 
-
 /*
 Idea:
 
@@ -28,8 +27,12 @@ Lastly, intersections between facets are checked. The process is repeated until 
 int main(int argc, char *argv[])
 {
   Polyhedron P;
-  std::ifstream in1((argc > 1) ? argv[1] : CGAL::data_file_path("meshes/cube_quad.off"));
+  std::ifstream in1((argc > 1) ? argv[1] : CGAL::data_file_path("meshes/icosahedron.off"));
   in1 >> P;
+
+  std::vector<std::pair<Polyhedron::Facet_handle, Polyhedron::Facet_handle>> mst;
+  unfoldPolyhedron(P, mst);
+
   CGAL::draw(P);
 
   return EXIT_SUCCESS;
