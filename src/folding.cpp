@@ -16,6 +16,8 @@ typedef Kernel::FT FT;
 typedef CGAL::Aff_transformation_3<Kernel> Aff_transformation_3;
 typedef CGAL::Polyhedron_3<Kernel> Polyhedron;
 
+typedef std::vector<Polyhedron::Halfedge_const_handle> SpanningTree;
+
 Aff_transformation_3 createRotationTransformation(const Vector_3 &normal_a, const Vector_3 &normal_b)
 {
   if (normal_a == normal_b)
@@ -53,60 +55,56 @@ Aff_transformation_3 getFallingDownTransformation(const Point_3 &facetPoint, con
   // Project the facetPoint onto the plane
   Point_3 projectedPoint = plane.projection(facetPoint);
 
+  Vector_3 facetPointVector = Vector_3(facetPoint.x(), facetPoint.y(), facetPoint.z());
+
   // Calculate translation vector
-  Vector_3 translationVector = projectedPoint - facetPoint;
-  Aff_transformation_3 translate(CGAL::TRANSLATION, translationVector);
+  Aff_transformation_3 translate(CGAL::TRANSLATION, projectedPoint - facetPoint);
 
   // Calculate rotation matrix
+  // (first, translate the facetPoint to the origin, then rotate, then translate back to the original position)
   Vector_3 planeNormal = plane.orthogonal_vector();
-  Aff_transformation_3 rotate = createRotationTransformation(facetNormal, planeNormal);
+  Aff_transformation_3 rotate =
+      Aff_transformation_3(CGAL::TRANSLATION, facetPointVector) *
+      createRotationTransformation(facetNormal, planeNormal) *
+      Aff_transformation_3(CGAL::TRANSLATION, -facetPointVector);
 
   // Combine translation and rotation
   return translate * rotate;
 }
 
-Polyhedron unfoldPolyhedron(const Polyhedron &P,
-                            const std::vector<std::pair<Polyhedron::Facet_handle, Polyhedron::Facet_handle>> &spanningTree)
+Vector_3 getFaceNormal(const Polyhedron::Facet_const_handle facet)
 {
-  Polyhedron unfoldedPolyhedron = P;
+  Polyhedron::Halfedge_const_handle h = facet->halfedge();
+  Vector_3 normal = CGAL::cross_product(
+      h->next()->vertex()->point() - h->vertex()->point(),
+      h->next()->next()->vertex()->point() - h->next()->vertex()->point());
+  normal /= CGAL::approximate_sqrt(normal.squared_length());
 
-  // this will need to be replaced by a random normal
-  Vector_3 downNormal(0, 0, -1);
+  return normal;
+}
 
-  // Find the facet that is facing down most
-  Polyhedron::Facet_handle downFacet = unfoldedPolyhedron.facets_begin();
-  FT downFacetZ = 0;
-  for (Polyhedron::Facet_handle facet = unfoldedPolyhedron.facets_begin(); facet != unfoldedPolyhedron.facets_end(); ++facet)
-  {
-    // Calculate and store the normal of the facet
-    Polyhedron::Halfedge_const_handle h = facet->halfedge();
-    Vector_3 normal = CGAL::cross_product(
-          h->next()->vertex()->point() - h->vertex()->point(),
-          h->next()->next()->vertex()->point() - h->next()->vertex()->point());
-    normal /= CGAL::approximate_sqrt(normal.squared_length());
-    facet->plane() = Plane_3(h->vertex()->point(), normal);
+// generate transform to unfold the face on the opposing edge along the edges to match the face along the current edge
+Aff_transformation_3 getFaceUnfoldTransformation(const Polyhedron::Halfedge_const_handle edge)
+{
+  Vector_3 targetNormal = getFaceNormal(edge->facet());
+  Vector_3 currentNormal = getFaceNormal(edge->opposite()->facet());
+  Point_3 edgePoint = edge->vertex()->point();
+  Vector_3 edgePointVector = Vector_3(edgePoint.x(), edgePoint.y(), edgePoint.z());
 
-    FT z = CGAL::scalar_product(normal, downNormal);
-    std::cout << "Normal: " << normal << "z: " << z << std::endl;
-    if (z > downFacetZ)
-    {
-      downFacet = facet;
-      downFacetZ = CGAL::scalar_product(normal, downNormal);
-    }
-    {
-      downFacet = facet;
-      downNormal = normal;
-    }
-  }
-  std::cout << "Down facet: " << downFacet->plane() << std::endl;
-  std::cout << "Down normal: " << downNormal << std::endl;
+  return Aff_transformation_3(CGAL::TRANSLATION, edgePointVector) *
+         createRotationTransformation(currentNormal, targetNormal) *
+         Aff_transformation_3(CGAL::TRANSLATION, -edgePointVector);
+}
 
-  // The steepest edge cut tree contains the steepest edges of all vertices, except the vertex with maximal z-coordinate.
+// The steepest edge cut tree contains the steepest edges of all vertices, except the vertex with maximal z-coordinate.
+SpanningTree steepestEdgeCut(const Polyhedron &P, const Vector_3 downNormal)
+{
+  SpanningTree result;
 
   // Find the vertex with maximal z-coordinate
-  Polyhedron::Vertex_const_handle maxZVertex = unfoldedPolyhedron.vertices_begin();
+  Polyhedron::Vertex_const_handle maxZVertex = P.vertices_begin();
   FT maxZ = 0;
-  for (Polyhedron::Vertex_const_handle vertex = unfoldedPolyhedron.vertices_begin(); vertex != unfoldedPolyhedron.vertices_end(); ++vertex)
+  for (Polyhedron::Vertex_const_handle vertex = P.vertices_begin(); vertex != P.vertices_end(); ++vertex)
   {
     Point_3 vertexPoint = vertex->point();
     FT z = CGAL::scalar_product(Vector_3(vertexPoint.x(), vertexPoint.y(), vertexPoint.z()), downNormal);
@@ -119,7 +117,7 @@ Polyhedron unfoldPolyhedron(const Polyhedron &P,
 
   // Find the steepest edge for each vertex
   std::vector<Polyhedron::Halfedge_const_handle> steepestEdges;
-  for (Polyhedron::Vertex_const_handle vertex = unfoldedPolyhedron.vertices_begin(); vertex != unfoldedPolyhedron.vertices_end(); ++vertex)
+  for (Polyhedron::Vertex_const_handle vertex = P.vertices_begin(); vertex != P.vertices_end(); ++vertex)
   {
     if (vertex == maxZVertex)
     {
@@ -129,9 +127,9 @@ Polyhedron unfoldPolyhedron(const Polyhedron &P,
     Polyhedron::Halfedge_const_handle steepestEdge = vertex->halfedge();
     FT steepestEdgeZ = 0;
 
-
     Polyhedron::Halfedge_around_vertex_const_circulator edge = vertex->vertex_begin();
-    do {
+    do
+    {
       Vector_3 edgeVector = edge->vertex()->point() - edge->opposite()->vertex()->point();
       edgeVector /= CGAL::approximate_sqrt(edgeVector.squared_length());
 
@@ -150,6 +148,73 @@ Polyhedron unfoldPolyhedron(const Polyhedron &P,
 
   // TODO: create MST from steepest edges
 
+  return result;
+}
 
-  return P;
+Polyhedron unfoldPolyhedron(const Polyhedron &P,
+                            const SpanningTree &spanningTree)
+{
+  // Find the facet that is facing down most
+  Polyhedron::Facet_const_handle downFacet = P.facets_begin();
+  FT downFacetZ = 0;
+  for (Polyhedron::Facet_const_handle facet = P.facets_begin(); facet != P.facets_end(); ++facet)
+  {
+    // Calculate and store the normal of the facet
+    Vector_3 normal = getFaceNormal(facet);
+
+    FT z = CGAL::scalar_product(normal, Vector_3(0, 0, -1));
+    std::cout << "Normal: " << normal << "z: " << z << std::endl;
+    if (z > downFacetZ)
+    {
+      downFacet = facet;
+      downFacetZ = z;
+    }
+  }
+  std::cout << "Down facet: " << downFacet->plane() << std::endl;
+
+  // Populate ToDo list with facets that need to be transformed
+  std::map<Point_3, Point_3> pointMap;
+  std::map<Polyhedron::Facet_const_handle, Aff_transformation_3> transformMap;
+  std::deque<Polyhedron::Facet_const_handle> todo = {downFacet};
+  transformMap[downFacet] = getFallingDownTransformation(
+      downFacet->halfedge()->vertex()->point(),
+      downFacet->plane().orthogonal_vector(),
+      Plane_3(Point_3(0, 0, 0), Vector_3(0, 0, -1)));
+
+  while (todo.size() > 0)
+  {
+    // Fetch the current facet
+    Polyhedron::Facet_const_handle facet = todo.front();
+    todo.pop_front();
+
+    // Transform the points of the current facet
+    Polyhedron::Halfedge_const_handle h = facet->halfedge();
+    do
+    {
+      // If the point has not been transformed yet, transform it
+      if (pointMap.find(h->vertex()->point()) == pointMap.end())
+      {
+        // TODO: points need to be duplicated on cut edges
+        pointMap[h->vertex()->point()] = transformMap[facet].transform(h->vertex()->point());
+      }
+      h = h->next();
+    } while (h != facet->halfedge());
+
+    // Add the children of the current facet to the ToDo list
+    for (Polyhedron::Halfedge_const_handle tree_edge : spanningTree)
+    {
+      auto other_facet = tree_edge->opposite()->facet();
+      if (tree_edge->facet() == facet &&
+          transformMap.find(other_facet) == transformMap.end())
+      {
+        todo.push_back(other_facet);
+        // The transformation of the child is the unfolding along the shared edge, followed by the parent's transformation
+        transformMap[other_facet] = transformMap[facet] * getFaceUnfoldTransformation(tree_edge);
+      }
+    }
+  }
+
+  // TODO: construct the unfolded polyhedron
+  Polyhedron unfolded;
+  return unfolded;
 }
