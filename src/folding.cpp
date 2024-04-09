@@ -129,9 +129,9 @@ Polyhedron unfoldPolyhedron(const Polyhedron &P,
     Polyhedron::Halfedge_const_handle steepestEdge = vertex->halfedge();
     FT steepestEdgeZ = 0;
 
-    // TODO: does that actually cover all outgoing edges?
-    for (Polyhedron::Halfedge_around_vertex_const_circulator edge = vertex->vertex_begin(); edge != vertex->vertex_begin(); edge = ++edge)
-    {
+
+    Polyhedron::Halfedge_around_vertex_const_circulator edge = vertex->vertex_begin();
+    do {
       Vector_3 edgeVector = edge->vertex()->point() - edge->opposite()->vertex()->point();
       edgeVector /= CGAL::approximate_sqrt(edgeVector.squared_length());
 
@@ -141,7 +141,10 @@ Polyhedron unfoldPolyhedron(const Polyhedron &P,
         steepestEdge = edge;
         steepestEdgeZ = z;
       }
-    }
+
+      edge = ++edge;
+    } while (edge != vertex->vertex_begin());
+
     steepestEdges.push_back(steepestEdge);
   }
 
