@@ -16,7 +16,15 @@ typedef Kernel::FT FT;
 typedef CGAL::Aff_transformation_3<Kernel> Aff_transformation_3;
 typedef CGAL::Polyhedron_3<Kernel> Polyhedron;
 
-typedef std::vector<Polyhedron::Halfedge_const_handle> SpanningTree;
+template <class T>
+struct SimpleTree
+{
+  SimpleTree *parent;
+  std::vector<SimpleTree> children;
+  T data;
+};
+
+typedef SimpleTree<Polyhedron::Halfedge_const_handle> SpanningTree;
 
 Aff_transformation_3 createRotationTransformation(const Vector_3 &normal_a, const Vector_3 &normal_b)
 {
@@ -99,8 +107,6 @@ Aff_transformation_3 getFaceUnfoldTransformation(const Polyhedron::Halfedge_cons
 // The steepest edge cut tree contains the steepest edges of all vertices, except the vertex with maximal z-coordinate.
 SpanningTree steepestEdgeCut(const Polyhedron &P, const Vector_3 downNormal)
 {
-  SpanningTree result;
-
   // Find the vertex with maximal z-coordinate
   Polyhedron::Vertex_const_handle maxZVertex = P.vertices_begin();
   FT maxZ = 0;
@@ -116,7 +122,7 @@ SpanningTree steepestEdgeCut(const Polyhedron &P, const Vector_3 downNormal)
   }
 
   // Find the steepest edge for each vertex
-  std::vector<Polyhedron::Halfedge_const_handle> steepestEdges;
+  std::set<Polyhedron::Halfedge_const_handle> steepestEdges;
   for (Polyhedron::Vertex_const_handle vertex = P.vertices_begin(); vertex != P.vertices_end(); ++vertex)
   {
     if (vertex == maxZVertex)
@@ -143,17 +149,9 @@ SpanningTree steepestEdgeCut(const Polyhedron &P, const Vector_3 downNormal)
       edge = ++edge;
     } while (edge != vertex->vertex_begin());
 
-    steepestEdges.push_back(steepestEdge);
+    steepestEdges.insert(steepestEdge);
   }
 
-  // TODO: create MST from steepest edges
-
-  return result;
-}
-
-Polyhedron unfoldPolyhedron(const Polyhedron &P,
-                            const SpanningTree &spanningTree)
-{
   // Find the facet that is facing down most
   Polyhedron::Facet_const_handle downFacet = P.facets_begin();
   FT downFacetZ = 0;
@@ -172,48 +170,116 @@ Polyhedron unfoldPolyhedron(const Polyhedron &P,
   }
   std::cout << "Down facet: " << downFacet->plane() << std::endl;
 
+  SpanningTree tree;
+  tree.data = downFacet->halfedge();
+  std::set<Polyhedron::Facet_const_handle> visited{tree.data->facet()};
+  std::deque<SpanningTree *> todo{&tree};
+
+  while (todo.size() > 0)
+  {
+    SpanningTree &node = *todo.front();
+    todo.pop_front();
+
+    // iterate over neighboring edges to get neihbor facets
+    Polyhedron::Halfedge_const_handle edge = node.data->facet_begin();
+    do
+    {
+      Polyhedron::Facet_const_handle otherFacet = edge->opposite()->facet();
+      // steepest edges are cut, so they are not part of the tree
+      // if the facet has not been visited yet, add it to the tree
+      if (steepestEdges.find(edge) == steepestEdges.end() &&
+          visited.find(otherFacet) == visited.end())
+      {
+        visited.insert(otherFacet);
+        SpanningTree child{.parent = &node, .data = edge->opposite()};
+        tree.children.emplace_back(child);
+        todo.push_back(&tree.children.back());
+      }
+    } while (++edge != node.data->facet_begin());
+  }
+
+  return tree;
+}
+
+Polyhedron unfoldPolyhedron(const Polyhedron &P,
+                            const SpanningTree &tree)
+{
+
+  // First facet, root of the tree
+  auto downFacet = tree.data->facet();
+
+  // Transformed vertices
+  std::vector<Point_3> vertices;
+
+  // Transformed faces as a list of vertex indices
+  std::vector<std::vector<size_t>> faces;
+
+  // Points that are shared with parent and therefore already transformed
+  std::map<Polyhedron::Halfedge_const_handle, std::pair<size_t, size_t>> pointsFromParent;
+
   // Populate ToDo list with facets that need to be transformed
-  std::map<Point_3, Point_3> pointMap;
   std::map<Polyhedron::Facet_const_handle, Aff_transformation_3> transformMap;
-  std::deque<Polyhedron::Facet_const_handle> todo = {downFacet};
+  std::deque<const SpanningTree *> todo{&tree};
   transformMap[downFacet] = getFallingDownTransformation(
       downFacet->halfedge()->vertex()->point(),
       downFacet->plane().orthogonal_vector(),
       Plane_3(Point_3(0, 0, 0), Vector_3(0, 0, -1)));
 
+  // Calculate parent points for the root facet
+  vertices.push_back(transformMap[downFacet](downFacet->halfedge()->vertex()->point()));
+  vertices.push_back(transformMap[downFacet](downFacet->halfedge()->next()->vertex()->point()));
+  pointsFromParent[downFacet->halfedge()] = {0, 1};
+
   while (todo.size() > 0)
   {
     // Fetch the current facet
-    Polyhedron::Facet_const_handle facet = todo.front();
+    const SpanningTree &node = *todo.front();
     todo.pop_front();
+    Polyhedron::Facet_const_handle facet = node.data->facet();
+    Polyhedron::Halfedge_const_handle edgeToParent = node.data;
 
-    // Transform the points of the current facet
-    Polyhedron::Halfedge_const_handle h = facet->halfedge();
+    // Initialize the face with the parent's points
+    auto parentPoints = pointsFromParent[edgeToParent];
+    faces.push_back({parentPoints.first, parentPoints.second});
+    auto &face = faces.back();
+    // Add the transformed points of the child to the face
+    auto edge_iterator = edgeToParent->next()->next();
     do
     {
-      // If the point has not been transformed yet, transform it
-      if (pointMap.find(h->vertex()->point()) == pointMap.end())
-      {
-        // TODO: points need to be duplicated on cut edges
-        pointMap[h->vertex()->point()] = transformMap[facet].transform(h->vertex()->point());
-      }
-      h = h->next();
-    } while (h != facet->halfedge());
+      vertices.push_back(transformMap[facet](edge_iterator->vertex()->point()));
+      face.push_back(vertices.size() - 1);
+    } while (++edge_iterator != edgeToParent);
 
-    // Add the children of the current facet to the ToDo list
-    for (Polyhedron::Halfedge_const_handle tree_edge : spanningTree)
+    // Iterate over the neighboring edges to get the neighboring facets
+    for (const auto &child : node.children)
     {
-      auto other_facet = tree_edge->opposite()->facet();
-      if (tree_edge->facet() == facet &&
-          transformMap.find(other_facet) == transformMap.end())
+      todo.push_back(&child);
+
+      // Find the common edge between the parent and child
+      auto edgeToChild = child.data->opposite();
+
+      // The transformation of the child is the unfolding along the shared edge,
+      // followed by the parent's transformation
+      transformMap[child.data->facet()] =
+          transformMap[facet] * getFaceUnfoldTransformation(edgeToChild);
+
+      // Calculate the indices of the shared points
+      size_t distToStartingEdge = 0;
       {
-        todo.push_back(other_facet);
-        // The transformation of the child is the unfolding along the shared edge, followed by the parent's transformation
-        transformMap[other_facet] = transformMap[facet] * getFaceUnfoldTransformation(tree_edge);
+        auto temp = edgeToParent;
+        while (temp != edgeToChild)
+        {
+          temp = temp->next();
+          distToStartingEdge++;
+        }
       }
+      // Add the shared points to the map with inverted order
+      pointsFromParent[edgeToChild] = {distToStartingEdge + 1, distToStartingEdge};
     }
   }
 
+  // vertices and faces are populated, now create the polyhedron
+  // TODO check for overlaps on the resulting polygons
   // TODO: construct the unfolded polyhedron
   Polyhedron unfolded;
   return unfolded;
