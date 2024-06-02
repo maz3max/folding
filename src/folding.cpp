@@ -105,6 +105,7 @@ Aff_transformation_3 getFaceUnfoldTransformation(const Polyhedron::Halfedge_cons
 }
 
 // The steepest edge cut tree contains the steepest edges of all vertices, except the vertex with maximal z-coordinate.
+// TODO: split this function into parts: findMaxZVertex, findSteepestEdges, findDownFacet, buildSpanningTree
 SpanningTree steepestEdgeCut(const Polyhedron &P, const Vector_3 downNormal)
 {
   // Find the vertex with maximal z-coordinate
@@ -125,7 +126,7 @@ SpanningTree steepestEdgeCut(const Polyhedron &P, const Vector_3 downNormal)
   std::cout << "Max Z vertex: " << maxZVertex->point() << std::endl;
 
   // Find the steepest edge for each vertex
-  std::set<Polyhedron::Halfedge_const_handle> steepestEdges;
+  std::set<Polyhedron::Halfedge_const_handle> steepestEdges;  // TODO: just store point pairs
   for (Polyhedron::Vertex_const_handle vertex = P.vertices_begin(); vertex != P.vertices_end(); ++vertex)
   {
     if (vertex == maxZVertex)
@@ -226,6 +227,7 @@ SpanningTree steepestEdgeCut(const Polyhedron &P, const Vector_3 downNormal)
   return tree;
 }
 
+//TODO: output should be a list of vertices and faces referencing the vertices
 Polyhedron unfoldPolyhedron(const Polyhedron &P,
                             const SpanningTree &tree)
 {
