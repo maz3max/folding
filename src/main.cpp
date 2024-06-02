@@ -30,21 +30,15 @@ int main(int argc, char *argv[])
         std::ifstream in1((argc > 1) ? argv[1] : CGAL::data_file_path("meshes/icosahedron.off"));
         in1 >> P;
 
-        SpanningTree mst;
+        Vector_3 normal(0.64486, 0.324763, 0.691871);
+        normal = normal / CGAL::approximate_sqrt(normal.squared_length());
+
+        // print the normal vector
+        std::cout << "Normal vector: " << normal << std::endl;
+
+        SpanningTree mst = steepestEdgeCut(P, normal);
 
         Polyhedron U = unfoldPolyhedron(P, mst);
-
-        {
-                std::ofstream out("original.wrl");
-                CGAL::VRML_2_ostream S(out);
-                S << P;
-        }
-
-        {
-                std::ofstream out("unfolded.wrl");
-                CGAL::VRML_2_ostream S(out);
-                S << U;
-        }
 
         return EXIT_SUCCESS;
 }

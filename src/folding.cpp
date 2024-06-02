@@ -109,7 +109,7 @@ SpanningTree steepestEdgeCut(const Polyhedron &P, const Vector_3 downNormal)
 {
   // Find the vertex with maximal z-coordinate
   Polyhedron::Vertex_const_handle maxZVertex = P.vertices_begin();
-  FT maxZ = 0;
+  FT maxZ = -INFINITY;
   for (Polyhedron::Vertex_const_handle vertex = P.vertices_begin(); vertex != P.vertices_end(); ++vertex)
   {
     Point_3 vertexPoint = vertex->point();
@@ -121,6 +121,9 @@ SpanningTree steepestEdgeCut(const Polyhedron &P, const Vector_3 downNormal)
     }
   }
 
+  //print the vertex with maximal z-coordinate
+  std::cout << "Max Z vertex: " << maxZVertex->point() << std::endl;
+
   // Find the steepest edge for each vertex
   std::set<Polyhedron::Halfedge_const_handle> steepestEdges;
   for (Polyhedron::Vertex_const_handle vertex = P.vertices_begin(); vertex != P.vertices_end(); ++vertex)
@@ -131,7 +134,7 @@ SpanningTree steepestEdgeCut(const Polyhedron &P, const Vector_3 downNormal)
     }
 
     Polyhedron::Halfedge_const_handle steepestEdge = vertex->halfedge();
-    FT steepestEdgeZ = 0;
+    FT steepestEdgeZ = -INFINITY;
 
     Polyhedron::Halfedge_around_vertex_const_circulator edge = vertex->vertex_begin();
     do
@@ -150,28 +153,40 @@ SpanningTree steepestEdgeCut(const Polyhedron &P, const Vector_3 downNormal)
     } while (edge != vertex->vertex_begin());
 
     steepestEdges.insert(steepestEdge);
+    steepestEdges.insert(steepestEdge->opposite());
   }
+
+  // print how many edges were cut
+  std::cout << "Steepest edges: " << steepestEdges.size() / 2
+  << " out of " << P.size_of_halfedges() / 2 << std::endl;
 
   // Find the facet that is facing down most
   Polyhedron::Facet_const_handle downFacet = P.facets_begin();
-  FT downFacetZ = 0;
+  FT downFacetZ = -INFINITY;
   for (Polyhedron::Facet_const_handle facet = P.facets_begin(); facet != P.facets_end(); ++facet)
   {
     // Calculate and store the normal of the facet
     Vector_3 normal = getFaceNormal(facet);
 
     FT z = CGAL::scalar_product(normal, Vector_3(0, 0, -1));
-    std::cout << "Normal: " << normal << "z: " << z << std::endl;
+    //std::cout << "Normal: " << normal << "z: " << z << std::endl;
     if (z > downFacetZ)
     {
       downFacet = facet;
       downFacetZ = z;
     }
   }
-  std::cout << "Down facet: " << downFacet->plane() << std::endl;
+  Vector_3 downFacetNormal = getFaceNormal(downFacet);
+  Point_3 downFacetPoint = downFacet->halfedge()->vertex()->point();
+  std::cout << "Down facet: n=(" << downFacetNormal << ") p=(" << downFacetPoint << ")" <<std::endl;
+
+  std::cout << "( " << downFacet->halfedge()->vertex()->point() <<" )" <<std::endl;
+  std::cout << "( " << downFacet->halfedge()->next()->vertex()->point() <<" )" <<std::endl;
+  std::cout << "( " << downFacet->halfedge()->next()->next()->vertex()->point() <<" )" <<std::endl;
 
   SpanningTree tree;
   tree.data = downFacet->halfedge();
+  tree.parent = nullptr;
   std::set<Polyhedron::Facet_const_handle> visited{tree.data->facet()};
   std::deque<SpanningTree *> todo{&tree};
 
@@ -179,6 +194,16 @@ SpanningTree steepestEdgeCut(const Polyhedron &P, const Vector_3 downNormal)
   {
     SpanningTree &node = *todo.front();
     todo.pop_front();
+
+    // print vertices of the current facet
+    {
+      Polyhedron::Halfedge_const_handle edge = node.data;
+      do
+      {
+        std::cout << "v (" << edge->vertex()->point() << ") ";
+      } while (++edge != node.data);
+      std::cout << std::endl;
+    }
 
     // iterate over neighboring edges to get neihbor facets
     Polyhedron::Halfedge_const_handle edge = node.data->facet_begin();
@@ -191,9 +216,9 @@ SpanningTree steepestEdgeCut(const Polyhedron &P, const Vector_3 downNormal)
           visited.find(otherFacet) == visited.end())
       {
         visited.insert(otherFacet);
-        SpanningTree child{.parent = &node, .data = edge->opposite()};
-        tree.children.emplace_back(child);
-        todo.push_back(&tree.children.back());
+        SpanningTree child{.parent = &node, .data = edge->opposite()->facet()->halfedge()};
+        tree.children.push_back(child);
+        todo.push_back(&(tree.children.back()));
       }
     } while (++edge != node.data->facet_begin());
   }
@@ -276,6 +301,22 @@ Polyhedron unfoldPolyhedron(const Polyhedron &P,
       // Add the shared points to the map with inverted order
       pointsFromParent[edgeToChild] = {distToStartingEdge + 1, distToStartingEdge};
     }
+  }
+
+  //print the vertices
+  for (size_t i = 0; i < vertices.size(); i++)
+  {
+    std::cout << "v " << vertices[i] << std::endl;
+  }
+  //print the faces
+  for (size_t i = 0; i < faces.size(); i++)
+  {
+    std::cout << "f ";
+    for (size_t j = 0; j < faces[i].size(); j++)
+    {
+      std::cout << faces[i][j] + 1 << " ";
+    }
+    std::cout << std::endl;
   }
 
   // vertices and faces are populated, now create the polyhedron
