@@ -80,15 +80,23 @@ Aff_transformation_3 getFallingDownTransformation(const Point_3 &facetPoint, con
   return translate * rotate;
 }
 
+/** Compute Normal from three points of a face in ccw order */
+Vector_3 getThreePointNormal(const Point_3 &a, const Point_3 &b, const Point_3 &c)
+{
+  Vector_3 normal = CGAL::cross_product(b - a, c - b);
+  normal /= CGAL::approximate_sqrt(normal.squared_length());
+  return normal;
+}
+
+/** Compute Normal of a polyhedron facet */
 Vector_3 getFaceNormal(const Polyhedron::Facet_const_handle facet)
 {
   Polyhedron::Halfedge_const_handle h = facet->halfedge();
-  Vector_3 normal = CGAL::cross_product(
-      h->next()->vertex()->point() - h->vertex()->point(),
-      h->next()->next()->vertex()->point() - h->next()->vertex()->point());
-  normal /= CGAL::approximate_sqrt(normal.squared_length());
-
-  return normal;
+  return getThreePointNormal(
+    h->vertex()->point(),
+    h->next()->vertex()->point(),
+    h->next()->next()->vertex()->point()
+  );
 }
 
 // generate transform to unfold the face on the opposing edge along the edges to match the face along the current edge
