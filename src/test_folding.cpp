@@ -1,6 +1,8 @@
 #include "folding.cpp"
 #include <gtest/gtest.h>
 
+static const FT epsilon = 1e-6;
+
 TEST(getRotationTransformationTest, IdentityTest) {
     //setup
     Vector_3 normal_a(1, 0, 0);
@@ -23,7 +25,7 @@ TEST(getRotationTransformationTest, Simple) {
 
     //verify
     Vector_3 normal_a_transformed = normal_a.transform(transformation);
-    ASSERT_LT((normal_a_transformed-=normal_b).squared_length(), 1e-6);
+    ASSERT_LT((normal_a_transformed-=normal_b).squared_length(), epsilon);
 }
 
 TEST(getRotationTransformationTest, InvertedTest) {
@@ -36,12 +38,11 @@ TEST(getRotationTransformationTest, InvertedTest) {
 
     //verify
     Vector_3 normal_a_transformed = normal_a.transform(transformation);
-    ASSERT_LT((normal_a_transformed-=normal_b).squared_length(), 1e-6);
+    ASSERT_LT((normal_a_transformed-=normal_b).squared_length(), epsilon);
 }
 
 TEST(FallingDownTransformationTest, TypicalTriangle) {
     //setup
-    const FT epsilon = 1e-6;
     const Point_3 a(-0.525731, 0.850651, 0);
     const Point_3 b(0.525731, 0.850651, 0);
     const Point_3 c(0, 0.525731, -0.850651);
@@ -87,7 +88,6 @@ TEST(FallingDownTransformationTest, TypicalTriangle) {
 TEST(RotationAroundLineSegmentTest, IsocahedronFaces)
 {
     //setup
-    const FT epsilon = 1e-6;
     const Point_3 a(-0.525731, 0.850651, 0);
     const Point_3 b(0.525731, 0.850651, 0);
     const Point_3 c(0, 0.525731, -0.850651);
