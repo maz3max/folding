@@ -1,38 +1,38 @@
 #include "folding.cpp"
 #include <gtest/gtest.h>
 
-TEST(CreateRotationTransformationTest, IdentityTest) {
+TEST(getRotationTransformationTest, IdentityTest) {
     //setup
     Vector_3 normal_a(1, 0, 0);
     Vector_3 normal_b(1, 0, 0);
 
     //run DUT
-    Aff_transformation_3 transformation = createRotationTransformation(normal_a, normal_b);
+    Aff_transformation_3 transformation = getRotationTransformation(normal_a, normal_b);
 
     //verify
     ASSERT_EQ(transformation, Aff_transformation_3(CGAL::IDENTITY));
 }
 
-TEST(CreateRotationTransformationTest, Simple) {
+TEST(getRotationTransformationTest, Simple) {
     //setup
     Vector_3 normal_a(0, 1, 0);
     Vector_3 normal_b(0, 0, 1);
 
     //run DUT
-    Aff_transformation_3 transformation = createRotationTransformation(normal_a, normal_b);
+    Aff_transformation_3 transformation = getRotationTransformation(normal_a, normal_b);
 
     //verify
     Vector_3 normal_a_transformed = normal_a.transform(transformation);
     ASSERT_LT((normal_a_transformed-=normal_b).squared_length(), 1e-6);
 }
 
-TEST(CreateRotationTransformationTest, InvertedTest) {
+TEST(getRotationTransformationTest, InvertedTest) {
     //setup
     Vector_3 normal_a(0.137907, -0.721527, 0.678514);
     Vector_3 normal_b(-0.137907, 0.721527, -0.678514);
 
     //run DUT
-    Aff_transformation_3 transformation = createRotationTransformation(normal_a, normal_b);
+    Aff_transformation_3 transformation = getRotationTransformation(normal_a, normal_b);
 
     //verify
     Vector_3 normal_a_transformed = normal_a.transform(transformation);
@@ -55,7 +55,7 @@ TEST(FallingDownTransformationTest, TypicalTriangle) {
     ASSERT_LT(CGAL::abs(lc - la), epsilon);
 
     //run DUT
-    Aff_transformation_3 transformation = getFallingDownTransformation(
+    const Aff_transformation_3 transformation = getFallingDownTransformation(
         a, // any point on the triangle
         normal, // normal of the triangle
         Plane_3(Point_3(0, 0, 0), Vector_3(0, 0, -1)) // the "down" plane
@@ -82,6 +82,46 @@ TEST(FallingDownTransformationTest, TypicalTriangle) {
     // the new normal should be the same as the plane normal
     const Vector_3 normal_transform = getThreePointNormal(a_transform, b_transform, c_transform);
     ASSERT_LT((normal_transform - Vector_3(0, 0, -1)).squared_length(), epsilon);
+}
+
+TEST(RotationAroundLineSegmentTest, IsocahedronFaces)
+{
+    //setup
+    const FT epsilon = 1e-6;
+    const Point_3 a(-0.525731, 0.850651, 0);
+    const Point_3 b(0.525731, 0.850651, 0);
+    const Point_3 c(0, 0.525731, -0.850651);
+    const Point_3 d(-0.850651, 0, -0.525731);
+    // triangle ABC is a face of the isocahedron
+    const Vector_3 normal0 = getThreePointNormal(c, a, b);
+    // triangle CDA is a face of the isocahedron
+    const Vector_3 normal1 = getThreePointNormal(a, c, d);
+    const FT la = (a-b).squared_length();
+    const FT lb = (b-c).squared_length();
+    const FT lc = (c-a).squared_length();
+    const FT ld = (d-a).squared_length();
+
+    ASSERT_LT(CGAL::abs(la - lb), epsilon);
+    ASSERT_LT(CGAL::abs(lb - lc), epsilon);
+    ASSERT_LT(CGAL::abs(lc - la), epsilon);
+    ASSERT_LT(CGAL::abs(la - ld), epsilon);
+
+    //run DUT
+    const Aff_transformation_3 transform = getRotationAroundLineSegment(normal0, normal1, a);
+
+    //verify
+    // transform the point that is not shared by the two faces
+    const Point_3 a_transform = a.transform(transform);
+    const Point_3 b_transform = b.transform(transform);
+    const Point_3 c_transform = c.transform(transform);
+    // the transformed point should be on the plane of the second face
+    ASSERT_LT(CGAL::squared_distance(Plane_3(a, normal1), b_transform), epsilon);
+    // the line segment points should stay the same after transformation
+    ASSERT_LT((a_transform - a).squared_length(), epsilon);
+    ASSERT_LT((c_transform - c).squared_length(), epsilon);
+    // the distance between the transformed points should be the same
+    ASSERT_LT(CGAL::abs((a - b_transform).squared_length() - la), epsilon);
+    ASSERT_LT(CGAL::abs((c - b_transform).squared_length() - la), epsilon);
 }
 
 int main(int argc, char** argv) {

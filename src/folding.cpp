@@ -26,7 +26,7 @@ struct SimpleTree
 
 typedef SimpleTree<Polyhedron::Halfedge_const_handle> SpanningTree;
 
-Aff_transformation_3 createRotationTransformation(const Vector_3 &normal_a, const Vector_3 &normal_b)
+Aff_transformation_3 getRotationTransformation(const Vector_3 &normal_a, const Vector_3 &normal_b)
 {
   if (normal_a == normal_b)
   {
@@ -73,7 +73,7 @@ Aff_transformation_3 getFallingDownTransformation(const Point_3 &facetPoint, con
   Vector_3 planeNormal = plane.orthogonal_vector();
   Aff_transformation_3 rotate =
       Aff_transformation_3(CGAL::TRANSLATION, facetPointVector) *
-      createRotationTransformation(facetNormal, planeNormal) *
+      getRotationTransformation(facetNormal, planeNormal) *
       Aff_transformation_3(CGAL::TRANSLATION, -facetPointVector);
 
   // Combine translation and rotation
@@ -99,17 +99,23 @@ Vector_3 getFaceNormal(const Polyhedron::Facet_const_handle facet)
   );
 }
 
+// generate transfrom from one plane to another by rotating around a line segment
+Aff_transformation_3 getRotationAroundLineSegment(const Vector_3& currentNormal, const Vector_3& targetNormal, const Point_3& edgePoint)
+{
+  Vector_3 edgePointVector = Vector_3(edgePoint.x(), edgePoint.y(), edgePoint.z());
+  return Aff_transformation_3(CGAL::TRANSLATION, edgePointVector) *
+         getRotationTransformation(currentNormal, targetNormal) *
+         Aff_transformation_3(CGAL::TRANSLATION, -edgePointVector);
+}
+
 // generate transform to unfold the face on the opposing edge along the edges to match the face along the current edge
 Aff_transformation_3 getFaceUnfoldTransformation(const Polyhedron::Halfedge_const_handle edge)
 {
   Vector_3 targetNormal = getFaceNormal(edge->facet());
   Vector_3 currentNormal = getFaceNormal(edge->opposite()->facet());
   Point_3 edgePoint = edge->vertex()->point();
-  Vector_3 edgePointVector = Vector_3(edgePoint.x(), edgePoint.y(), edgePoint.z());
 
-  return Aff_transformation_3(CGAL::TRANSLATION, edgePointVector) *
-         createRotationTransformation(currentNormal, targetNormal) *
-         Aff_transformation_3(CGAL::TRANSLATION, -edgePointVector);
+  return getRotationAroundLineSegment(currentNormal, targetNormal, edgePoint);
 }
 
 // The steepest edge cut tree contains the steepest edges of all vertices, except the vertex with maximal z-coordinate.
