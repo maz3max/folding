@@ -24,6 +24,12 @@ struct SimpleTree
   T data;
 };
 
+template <class T>
+struct SimpleTree2
+{
+  std::vector<std::pair<size_t, T>> children;
+};
+
 typedef SimpleTree<Polyhedron::Halfedge_const_handle> SpanningTree;
 
 Aff_transformation_3 getRotationTransformation(const Vector_3 &normal_a, const Vector_3 &normal_b)
@@ -118,11 +124,8 @@ Aff_transformation_3 getFaceUnfoldTransformation(const Polyhedron::Halfedge_cons
   return getRotationAroundLineSegment(currentNormal, targetNormal, edgePoint);
 }
 
-// The steepest edge cut tree contains the steepest edges of all vertices, except the vertex with maximal z-coordinate.
-// TODO: split this function into parts: findMaxZVertex, findSteepestEdges, findDownFacet, buildSpanningTree
-SpanningTree steepestEdgeCut(const Polyhedron &P, const Vector_3 downNormal)
+Polyhedron::Vertex_const_handle findMaxZVertex(const Polyhedron &P, const Vector_3 downNormal)
 {
-  // Find the vertex with maximal z-coordinate
   Polyhedron::Vertex_const_handle maxZVertex = P.vertices_begin();
   FT maxZ = -INFINITY;
   for (Polyhedron::Vertex_const_handle vertex = P.vertices_begin(); vertex != P.vertices_end(); ++vertex)
@@ -135,25 +138,26 @@ SpanningTree steepestEdgeCut(const Polyhedron &P, const Vector_3 downNormal)
       maxZ = z;
     }
   }
+  return maxZVertex;
+}
 
-  //print the vertex with maximal z-coordinate
-  std::cout << "Max Z vertex: " << maxZVertex->point() << std::endl;
-
-  // Find the steepest edge for each vertex
-  std::set<Polyhedron::Halfedge_const_handle> steepestEdges;  // TODO: just store point pairs
+std::vector<std::pair<Point_3, Point_3>> getSteepestEdges(const Polyhedron &P, const Vector_3 downNormal, Polyhedron::Vertex_const_handle maxZVertex)
+{
+  std::vector<std::pair<Point_3, Point_3>> steepestEdges;
   for (Polyhedron::Vertex_const_handle vertex = P.vertices_begin(); vertex != P.vertices_end(); ++vertex)
   {
     if (vertex == maxZVertex)
     {
       continue;
     }
-
     Polyhedron::Halfedge_const_handle steepestEdge = vertex->halfedge();
     FT steepestEdgeZ = -INFINITY;
 
+    // iterate over edges pointing to vertex
     Polyhedron::Halfedge_around_vertex_const_circulator edge = vertex->vertex_begin();
     do
     {
+      // normalized vector pointing away from the vertex
       Vector_3 edgeVector = edge->vertex()->point() - edge->opposite()->vertex()->point();
       edgeVector /= CGAL::approximate_sqrt(edgeVector.squared_length());
 
@@ -167,15 +171,13 @@ SpanningTree steepestEdgeCut(const Polyhedron &P, const Vector_3 downNormal)
       edge = ++edge;
     } while (edge != vertex->vertex_begin());
 
-    steepestEdges.insert(steepestEdge);
-    steepestEdges.insert(steepestEdge->opposite());
+    steepestEdges.emplace_back(steepestEdge->vertex()->point(), steepestEdge->opposite()->vertex()->point());
   }
+  return steepestEdges;
+}
 
-  // print how many edges were cut
-  std::cout << "Steepest edges: " << steepestEdges.size() / 2
-  << " out of " << P.size_of_halfedges() / 2 << std::endl;
-
-  // Find the facet that is facing down most
+Polyhedron::Facet_const_handle findDownFacet(const Polyhedron &P, const Vector_3 downNormal)
+{
   Polyhedron::Facet_const_handle downFacet = P.facets_begin();
   FT downFacetZ = -INFINITY;
   for (Polyhedron::Facet_const_handle facet = P.facets_begin(); facet != P.facets_end(); ++facet)
@@ -183,62 +185,91 @@ SpanningTree steepestEdgeCut(const Polyhedron &P, const Vector_3 downNormal)
     // Calculate and store the normal of the facet
     Vector_3 normal = getFaceNormal(facet);
 
-    FT z = CGAL::scalar_product(normal, Vector_3(0, 0, -1));
-    //std::cout << "Normal: " << normal << "z: " << z << std::endl;
+    FT z = CGAL::scalar_product(normal, downNormal);
     if (z > downFacetZ)
     {
       downFacet = facet;
       downFacetZ = z;
     }
   }
-  Vector_3 downFacetNormal = getFaceNormal(downFacet);
-  Point_3 downFacetPoint = downFacet->halfedge()->vertex()->point();
-  std::cout << "Down facet: n=(" << downFacetNormal << ") p=(" << downFacetPoint << ")" <<std::endl;
+  return downFacet;
+}
 
-  std::cout << "( " << downFacet->halfedge()->vertex()->point() <<" )" <<std::endl;
-  std::cout << "( " << downFacet->halfedge()->next()->vertex()->point() <<" )" <<std::endl;
-  std::cout << "( " << downFacet->halfedge()->next()->next()->vertex()->point() <<" )" <<std::endl;
+std::vector<Point_3> getFaceVertices(const Polyhedron::Halfedge_const_handle commonEdge)
+{
+  Polyhedron::Halfedge_const_handle edge = commonEdge;
+  std::vector<Point_3> faceVertices;
+  do
+  {
+    faceVertices.push_back(edge->vertex()->point());
+    edge = edge->next();
+  } while (edge != commonEdge);
+  return faceVertices;
+}
 
-  SpanningTree tree;
-  tree.data = downFacet->halfedge();
-  tree.parent = nullptr;
-  std::set<Polyhedron::Facet_const_handle> visited{tree.data->facet()};
-  std::deque<SpanningTree *> todo{&tree};
+SimpleTree2<std::vector<Point_3>> constructSpanningTree(
+  const Polyhedron &P,
+  Polyhedron::Facet_const_handle startFace,
+  std::vector<std::pair<Point_3, Point_3>> excludedEdges
+)
+{
+  SimpleTree2<std::vector<Point_3>> tree;
+  // todo list contains the index of the current node and the facet
+  std::deque<std::pair<size_t, Polyhedron::Facet_const_handle>> todo{{0, startFace}};
+  // visited facets
+  std::set<Polyhedron::Facet_const_handle> visited{startFace};
+  // add the first face to the tree (parent index, facet) (root is pointing to itself)
+  tree.children.push_back({0, getFaceVertices(startFace->halfedge())});
 
   while (todo.size() > 0)
   {
-    SpanningTree &node = *todo.front();
+    auto [current_index, currentFace] = todo.front();
     todo.pop_front();
 
-    // print vertices of the current facet
-    {
-      Polyhedron::Halfedge_const_handle edge = node.data;
-      do
-      {
-        std::cout << "v (" << edge->vertex()->point() << ") ";
-      } while (++edge != node.data);
-      std::cout << std::endl;
-    }
-
-    // iterate over neighboring edges to get neihbor facets
-    Polyhedron::Halfedge_const_handle edge = node.data->facet_begin();
+    // Add the neighboring faces to the todo list
+    Polyhedron::Halfedge_const_handle edgeIterator = currentFace->halfedge();
     do
     {
-      Polyhedron::Facet_const_handle otherFacet = edge->opposite()->facet();
-      // steepest edges are cut, so they are not part of the tree
-      // if the facet has not been visited yet, add it to the tree
-      if (steepestEdges.find(edge) == steepestEdges.end() &&
-          visited.find(otherFacet) == visited.end())
+      // Skip edge if both points are in the excluded list
+      Point_3 point1 = edgeIterator->vertex()->point();
+      Point_3 point2 = edgeIterator->opposite()->vertex()->point();
+      if (
+        std::find(excludedEdges.begin(), excludedEdges.end(), std::make_pair(point1, point2)) != excludedEdges.end()
+        || std::find(excludedEdges.begin(), excludedEdges.end(), std::make_pair(point2, point1)) != excludedEdges.end()
+      )
       {
-        visited.insert(otherFacet);
-        SpanningTree child{.parent = &node, .data = edge->opposite()->facet()->halfedge()};
-        tree.children.push_back(child);
-        todo.push_back(&(tree.children.back()));
+        edgeIterator = edgeIterator->next();
+        continue;
       }
-    } while (++edge != node.data->facet_begin());
-  }
 
+      // Add the neighbor to the todo list
+      Polyhedron::Facet_const_handle neighbor = edgeIterator->opposite()->facet();
+      if (visited.find(neighbor) == visited.end())
+      {
+        tree.children.push_back({current_index, getFaceVertices(edgeIterator->opposite())});
+        visited.insert(neighbor);
+        todo.push_back({tree.children.size() - 1, neighbor});
+      }
+      edgeIterator = edgeIterator->next();
+    } while (edgeIterator != currentFace->halfedge());
+  }
   return tree;
+}
+
+// The steepest edge cut tree contains the steepest edges of all vertices, except the vertex with maximal z-coordinate.
+SimpleTree2<std::vector<Point_3>> steepestEdgeCut(const Polyhedron &P, const Vector_3 downNormal)
+{
+  // Find the vertex with maximal z-coordinate
+  auto maxZVertex = findMaxZVertex(P, downNormal);
+
+  // Find the steepest edge for each vertex
+  auto steepestEdges = getSteepestEdges(P, downNormal, maxZVertex);
+
+  // Find the facet that is facing down most
+  auto downFacet = findDownFacet(P, Vector_3(0, 0, -1));
+
+  // Construct the spanning tree
+  return constructSpanningTree(P, downFacet, steepestEdges);
 }
 
 //TODO: output should be a list of vertices and faces referencing the vertices
