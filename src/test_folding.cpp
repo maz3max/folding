@@ -157,31 +157,63 @@ TEST(FindDownFacetTest, Tet)
     ASSERT_TRUE(std::find(vertices.begin(), vertices.end(), Point_3(0, 0, 1)) != vertices.end());
 }
 
-TEST(GetSteepestEdgesTest, Cube)
+TEST(SteepestEdgeCutTest, Cube)
 {
     //setup
     Polyhedron P;
     std::ifstream(CGAL::data_file_path("meshes/cube_quad.off")) >> P;
     Vector_3 normal(0.64486, 0.324763, 0.691871);
+    normal = normal / CGAL::approximate_sqrt(normal.squared_length());
 
     //run DUT
     auto maxZVertex = findMaxZVertex(P, normal);
     auto steepestEdges = getSteepestEdges(P, normal, maxZVertex);
     auto startFacet = findDownFacet(P, normal);
-
-    for (auto edge: steepestEdges)
-    {
-        std::cout << "Edge: (" << edge.first << "), (" << edge.second << ")" << std::endl;
-    }
     auto tree = constructSpanningTree(P, startFacet, steepestEdges);
-    for (auto[parent, face_vertices] : tree.children) {
-        std::cout << "[" << parent << "] -> ";
-        for (auto vertex: face_vertices) {
-            std::cout << "(" << vertex << "), ";
-        }
-        std::cout << std::endl;
+
+    // for (auto edge: steepestEdges)
+    // {
+    //     std::cout << "Edge: (" << edge.first << "), (" << edge.second << ")" << std::endl;
+    // }
+    // for (auto[parent, face_vertices] : tree.children) {
+    //     std::cout << "[" << parent << "] -> ";
+    //     for (auto vertex: face_vertices) {
+    //         std::cout << "(" << vertex << "), ";
+    //     }
+    //     std::cout << std::endl;
+    // }
+    // 5 edges connect the 6 faces, so the other 7 need to be steepest
+    ASSERT_EQ(steepestEdges.size(), 7);
+    // all six faces should be in tree
+    ASSERT_EQ(tree.children.size(), 6);
+    // the first edge of each entry cannot be one of the excluded edges, skipping the first entry
+    for (size_t i = 1; i < tree.children.size(); i++)
+    {
+        auto[parent, face_vertices] = tree.children[i];
+        ASSERT_TRUE(
+            std::find(steepestEdges.begin(), steepestEdges.end(),
+            std::make_pair(face_vertices[0], face_vertices[1])) == steepestEdges.end()
+        );
+        ASSERT_TRUE(
+            std::find(steepestEdges.begin(), steepestEdges.end(),
+            std::make_pair(face_vertices[1], face_vertices[0])) == steepestEdges.end()
+        );
     }
-    //TODO
+    // the steepest edges should be unique
+    for (size_t i = 0; i < steepestEdges.size(); i++)
+    {
+        for (size_t j = i + 1; j < steepestEdges.size(); j++)
+        {
+            if (steepestEdges[i].first == steepestEdges[j].first)
+            {
+                ASSERT_NE(steepestEdges[i].second, steepestEdges[j].second);
+            }
+            if (steepestEdges[i].first == steepestEdges[j].second)
+            {
+                ASSERT_NE(steepestEdges[i].second, steepestEdges[j].first);
+            }
+        }
+    }
 }
 
 int main(int argc, char** argv) {
