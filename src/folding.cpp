@@ -246,7 +246,7 @@ SimpleTree2<std::vector<Point_3>> constructSpanningTree(
       Polyhedron::Facet_const_handle neighbor = edgeIterator->opposite()->facet();
       if (visited.find(neighbor) == visited.end())
       {
-        tree.children.push_back({current_index, getFaceVertices(edgeIterator->opposite())});
+        tree.children.push_back({current_index, getFaceVertices(edgeIterator->opposite()->prev())});
         visited.insert(neighbor);
         todo.push_back({tree.children.size() - 1, neighbor});
       }

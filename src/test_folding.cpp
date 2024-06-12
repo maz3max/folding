@@ -1,5 +1,6 @@
 #include "folding.cpp"
 #include <gtest/gtest.h>
+#include <algorithm>
 
 static const FT epsilon = 1e-6;
 
@@ -122,6 +123,65 @@ TEST(RotationAroundLineSegmentTest, IsocahedronFaces)
     // the distance between the transformed points should be the same
     ASSERT_LT(CGAL::abs((a - b_transform).squared_length() - la), epsilon);
     ASSERT_LT(CGAL::abs((c - b_transform).squared_length() - la), epsilon);
+}
+
+TEST(FindMaxZVertexTest, Tet)
+{
+    //setup
+    Polyhedron P;
+    std::ifstream(CGAL::data_file_path("meshes/tetrahedron.off")) >> P;
+
+    //run DUT
+    const Point_3 v0 = findMaxZVertex(P, Vector_3(0, 0, 1))->point();
+    const Point_3 v1 = findMaxZVertex(P, Vector_3(1.2, 0, 1.0))->point();
+
+    //verify
+    ASSERT_EQ(v0, Point_3(0.0, 0.0, 1.0));
+    ASSERT_EQ(v1, Point_3(1.0, 0.0, 0.0));
+}
+
+TEST(FindDownFacetTest, Tet)
+{
+    //setup
+    Polyhedron P;
+    std::ifstream(CGAL::data_file_path("meshes/tetrahedron.off")) >> P;
+
+    //run DUT
+    auto f0 = findDownFacet(P, Vector_3(-1, -1, -1));
+
+    //verify
+    auto vertices = getFaceVertices(f0->halfedge());
+    ASSERT_EQ(vertices.size(), 3);
+    ASSERT_TRUE(std::find(vertices.begin(), vertices.end(), Point_3(1, 0, 0)) != vertices.end());
+    ASSERT_TRUE(std::find(vertices.begin(), vertices.end(), Point_3(0, 1, 0)) != vertices.end());
+    ASSERT_TRUE(std::find(vertices.begin(), vertices.end(), Point_3(0, 0, 1)) != vertices.end());
+}
+
+TEST(GetSteepestEdgesTest, Cube)
+{
+    //setup
+    Polyhedron P;
+    std::ifstream(CGAL::data_file_path("meshes/cube_quad.off")) >> P;
+    Vector_3 normal(0.64486, 0.324763, 0.691871);
+
+    //run DUT
+    auto maxZVertex = findMaxZVertex(P, normal);
+    auto steepestEdges = getSteepestEdges(P, normal, maxZVertex);
+    auto startFacet = findDownFacet(P, normal);
+
+    for (auto edge: steepestEdges)
+    {
+        std::cout << "Edge: (" << edge.first << "), (" << edge.second << ")" << std::endl;
+    }
+    auto tree = constructSpanningTree(P, startFacet, steepestEdges);
+    for (auto[parent, face_vertices] : tree.children) {
+        std::cout << "[" << parent << "] -> ";
+        for (auto vertex: face_vertices) {
+            std::cout << "(" << vertex << "), ";
+        }
+        std::cout << std::endl;
+    }
+    //TODO
 }
 
 int main(int argc, char** argv) {

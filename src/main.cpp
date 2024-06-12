@@ -36,9 +36,5 @@ int main(int argc, char *argv[])
         // print the normal vector
         std::cout << "Normal vector: " << normal << std::endl;
 
-        SpanningTree mst = steepestEdgeCut(P, normal);
-
-        Polyhedron U = unfoldPolyhedron(P, mst);
-
         return EXIT_SUCCESS;
 }

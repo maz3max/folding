@@ -20,3 +20,5 @@ include_directories(${GTEST_INCLUDE_DIRS})
 add_executable (test_folding src/test_folding.cpp)
 target_link_libraries (test_folding ${GTEST_LIBRARIES} CGAL::CGAL)
 add_test (NAME test_folding COMMAND test_folding)
+
+target_compile_definitions(test_folding PRIVATE CGAL_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
