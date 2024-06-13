@@ -105,6 +105,11 @@ Vector_3 getFaceNormal(const Polyhedron::Facet_const_handle facet)
   );
 }
 
+Vector_3 getFaceNormal(const std::vector<Point_3> &face)
+{
+  return getThreePointNormal(face[0], face[1], face[2]);
+}
+
 // generate transfrom from one plane to another by rotating around a line segment
 Aff_transformation_3 getRotationAroundLineSegment(const Vector_3& currentNormal, const Vector_3& targetNormal, const Point_3& edgePoint)
 {
@@ -272,103 +277,47 @@ SimpleTree2<std::vector<Point_3>> steepestEdgeCut(const Polyhedron &P, const Vec
   return constructSpanningTree(P, downFacet, steepestEdges);
 }
 
-//TODO: output should be a list of vertices and faces referencing the vertices
-Polyhedron unfoldPolyhedron(const Polyhedron &P,
-                            const SpanningTree &tree)
+SimpleTree2<std::vector<Point_3>> unfoldTree(const SimpleTree2<std::vector<Point_3>> &tree)
 {
+  SimpleTree2<std::vector<Point_3>> unfoldedTree; unfoldedTree.children.reserve(tree.children.size());
+  Aff_transformation_3 transformations[tree.children.size()];
 
-  // First facet, root of the tree
-  auto downFacet = tree.data->facet();
-
-  // Transformed vertices
-  std::vector<Point_3> vertices;
-
-  // Transformed faces as a list of vertex indices
-  std::vector<std::vector<size_t>> faces;
-
-  // Points that are shared with parent and therefore already transformed
-  std::map<Polyhedron::Halfedge_const_handle, std::pair<size_t, size_t>> pointsFromParent;
-
-  // Populate ToDo list with facets that need to be transformed
-  std::map<Polyhedron::Facet_const_handle, Aff_transformation_3> transformMap;
-  std::deque<const SpanningTree *> todo{&tree};
-  transformMap[downFacet] = getFallingDownTransformation(
-      downFacet->halfedge()->vertex()->point(),
-      downFacet->plane().orthogonal_vector(),
-      Plane_3(Point_3(0, 0, 0), Vector_3(0, 0, -1)));
-
-  // Calculate parent points for the root facet
-  vertices.push_back(transformMap[downFacet](downFacet->halfedge()->vertex()->point()));
-  vertices.push_back(transformMap[downFacet](downFacet->halfedge()->next()->vertex()->point()));
-  pointsFromParent[downFacet->halfedge()] = {0, 1};
-
-  while (todo.size() > 0)
+  // set up initial transformation
+  transformations[0] = getFallingDownTransformation(
+    tree.children[0].second[0],
+    getFaceNormal(tree.children[0].second),
+    Plane_3(Point_3(0, 0, 0), Vector_3(0, 0, -1))
+  );
+  // set up initial face
+  unfoldedTree.children.push_back({0, {}});
+  unfoldedTree.children[0].second.reserve(tree.children[0].second.size());
+  for (auto &point : tree.children[0].second)
   {
-    // Fetch the current facet
-    const SpanningTree &node = *todo.front();
-    todo.pop_front();
-    Polyhedron::Facet_const_handle facet = node.data->facet();
-    Polyhedron::Halfedge_const_handle edgeToParent = node.data;
+    unfoldedTree.children[0].second.push_back(point.transform(transformations[0]));
+  }
 
-    // Initialize the face with the parent's points
-    auto parentPoints = pointsFromParent[edgeToParent];
-    faces.push_back({parentPoints.first, parentPoints.second});
-    auto &face = faces.back();
-    // Add the transformed points of the child to the face
-    auto edge_iterator = edgeToParent->next()->next();
-    do
+  for (size_t i = 1; i< tree.children.size(); i++)
+  {
+    // The parent of the current node is the parent of the parent of the current node
+    size_t parent_idx = tree.children[i].first;
+    auto &face = tree.children[i].second;
+    Aff_transformation_3 &parent_transform = transformations[parent_idx];
+    transformations[i] = parent_transform * getRotationAroundLineSegment(
+      getFaceNormal(face),
+      getFaceNormal(tree.children[parent_idx].second),
+      face[0] // edge point, first two points are parent edge
+    );
+    unfoldedTree.children.push_back({parent_idx, {}});
+    auto &transformed_face = unfoldedTree.children[i].second;
+    transformed_face.reserve(face.size());
+    // transform parent edge (double computation, but saves searching for the edge)
+    transformed_face.push_back(face[0].transform(parent_transform));
+    transformed_face.push_back(face[1].transform(parent_transform));
+    // transform remaining points
+    for (size_t j = 2; j < face.size(); j++)
     {
-      vertices.push_back(transformMap[facet](edge_iterator->vertex()->point()));
-      face.push_back(vertices.size() - 1);
-    } while (++edge_iterator != edgeToParent);
-
-    // Iterate over the neighboring edges to get the neighboring facets
-    for (const auto &child : node.children)
-    {
-      todo.push_back(&child);
-
-      // Find the common edge between the parent and child
-      auto edgeToChild = child.data->opposite();
-
-      // The transformation of the child is the unfolding along the shared edge,
-      // followed by the parent's transformation
-      transformMap[child.data->facet()] =
-          transformMap[facet] * getFaceUnfoldTransformation(edgeToChild);
-
-      // Calculate the indices of the shared points
-      size_t distToStartingEdge = 0;
-      {
-        auto temp = edgeToParent;
-        while (temp != edgeToChild)
-        {
-          temp = temp->next();
-          distToStartingEdge++;
-        }
-      }
-      // Add the shared points to the map with inverted order
-      pointsFromParent[edgeToChild] = {distToStartingEdge + 1, distToStartingEdge};
+      transformed_face.push_back(face[j].transform(transformations[i]));
     }
   }
-
-  //print the vertices
-  for (size_t i = 0; i < vertices.size(); i++)
-  {
-    std::cout << "v " << vertices[i] << std::endl;
-  }
-  //print the faces
-  for (size_t i = 0; i < faces.size(); i++)
-  {
-    std::cout << "f ";
-    for (size_t j = 0; j < faces[i].size(); j++)
-    {
-      std::cout << faces[i][j] + 1 << " ";
-    }
-    std::cout << std::endl;
-  }
-
-  // vertices and faces are populated, now create the polyhedron
-  // TODO check for overlaps on the resulting polygons
-  // TODO: construct the unfolded polyhedron
-  Polyhedron unfolded;
-  return unfolded;
+  return unfoldedTree;
 }

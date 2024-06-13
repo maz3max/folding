@@ -162,7 +162,7 @@ void steepestEdgeCutTest(const Polyhedron& P, const Vector_3& normal)
     //run DUT
     auto maxZVertex = getFurthestVertex(P, -normal);
     auto steepestEdges = getSteepestEdges(P, normal, maxZVertex);
-    auto startFacet = findDownFacet(P, normal);
+    auto startFacet = findDownFacet(P, Vector_3(0, 0, -1));
     auto tree = constructSpanningTree(P, startFacet, steepestEdges);
 
     //for (auto edge: steepestEdges)
@@ -223,7 +223,7 @@ TEST(SteepestEdgeCutTest, Cube)
     steepestEdgeCutTest(P, normal);
 }
 
-TEST(steepestEdgeCutTest, Iso)
+TEST(SteepestEdgeCutTest, Iso)
 {
     //setup
     Polyhedron P;
@@ -233,6 +233,32 @@ TEST(steepestEdgeCutTest, Iso)
 
     //run DUT / verify
     steepestEdgeCutTest(P, normal);
+}
+
+TEST(UnfoldTreeTest, Cube)
+{
+    //setup
+    Polyhedron P;
+    std::ifstream(CGAL::data_file_path("meshes/cube_quad.off")) >> P;
+    Vector_3 normal(0.64486, -0.324763, -0.691871);
+    normal = normal / CGAL::approximate_sqrt(normal.squared_length());
+
+    // run DUT
+    auto unfolded = unfoldTree(steepestEdgeCut(P, normal));
+
+    //verify
+    // all faces should be in tree
+    ASSERT_EQ(unfolded.children.size(), P.size_of_facets());
+
+    auto plane = Plane_3(Point_3(0, 0, 0), Vector_3(0, 0, -1));
+    // all points should be on the plane
+    for (auto[parent, face_vertices] : unfolded.children)
+    {
+        for (auto vertex : face_vertices)
+        {
+            ASSERT_LT(CGAL::squared_distance(plane, vertex), epsilon);
+        }
+    }
 }
 
 int main(int argc, char** argv) {
