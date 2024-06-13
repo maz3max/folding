@@ -124,7 +124,7 @@ Aff_transformation_3 getFaceUnfoldTransformation(const Polyhedron::Halfedge_cons
   return getRotationAroundLineSegment(currentNormal, targetNormal, edgePoint);
 }
 
-Polyhedron::Vertex_const_handle findMaxZVertex(const Polyhedron &P, const Vector_3 downNormal)
+Polyhedron::Vertex_const_handle getFurthestVertex(const Polyhedron &P, const Vector_3 downNormal)
 {
   Polyhedron::Vertex_const_handle maxZVertex = P.vertices_begin();
   FT maxZ = -INFINITY;
@@ -257,13 +257,13 @@ SimpleTree2<std::vector<Point_3>> constructSpanningTree(
 }
 
 // The steepest edge cut tree contains the steepest edges of all vertices, except the vertex with maximal z-coordinate.
-SimpleTree2<std::vector<Point_3>> steepestEdgeCut(const Polyhedron &P, const Vector_3 downNormal)
+SimpleTree2<std::vector<Point_3>> steepestEdgeCut(const Polyhedron &P, const Vector_3 normal)
 {
   // Find the vertex with maximal z-coordinate
-  auto maxZVertex = findMaxZVertex(P, downNormal);
+  auto maxZVertex = getFurthestVertex(P, -normal);
 
   // Find the steepest edge for each vertex
-  auto steepestEdges = getSteepestEdges(P, downNormal, maxZVertex);
+  auto steepestEdges = getSteepestEdges(P, normal, maxZVertex);
 
   // Find the facet that is facing down most
   auto downFacet = findDownFacet(P, Vector_3(0, 0, -1));

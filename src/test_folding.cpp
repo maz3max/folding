@@ -125,15 +125,15 @@ TEST(RotationAroundLineSegmentTest, IsocahedronFaces)
     ASSERT_LT(CGAL::abs((c - b_transform).squared_length() - la), epsilon);
 }
 
-TEST(FindMaxZVertexTest, Tet)
+TEST(GetFurthestVertexTest, Tet)
 {
     //setup
     Polyhedron P;
     std::ifstream(CGAL::data_file_path("meshes/tetrahedron.off")) >> P;
 
     //run DUT
-    const Point_3 v0 = findMaxZVertex(P, Vector_3(0, 0, 1))->point();
-    const Point_3 v1 = findMaxZVertex(P, Vector_3(1.2, 0, 1.0))->point();
+    const Point_3 v0 = getFurthestVertex(P, Vector_3(0, 0, 1))->point();
+    const Point_3 v1 = getFurthestVertex(P, Vector_3(1.2, 0, 1.0))->point();
 
     //verify
     ASSERT_EQ(v0, Point_3(0.0, 0.0, 1.0));
@@ -157,35 +157,30 @@ TEST(FindDownFacetTest, Tet)
     ASSERT_TRUE(std::find(vertices.begin(), vertices.end(), Point_3(0, 0, 1)) != vertices.end());
 }
 
-TEST(SteepestEdgeCutTest, Cube)
+void steepestEdgeCutTest(const Polyhedron& P, const Vector_3& normal)
 {
-    //setup
-    Polyhedron P;
-    std::ifstream(CGAL::data_file_path("meshes/cube_quad.off")) >> P;
-    Vector_3 normal(0.64486, 0.324763, 0.691871);
-    normal = normal / CGAL::approximate_sqrt(normal.squared_length());
-
     //run DUT
-    auto maxZVertex = findMaxZVertex(P, normal);
+    auto maxZVertex = getFurthestVertex(P, -normal);
     auto steepestEdges = getSteepestEdges(P, normal, maxZVertex);
     auto startFacet = findDownFacet(P, normal);
     auto tree = constructSpanningTree(P, startFacet, steepestEdges);
 
-    // for (auto edge: steepestEdges)
-    // {
-    //     std::cout << "Edge: (" << edge.first << "), (" << edge.second << ")" << std::endl;
-    // }
-    // for (auto[parent, face_vertices] : tree.children) {
-    //     std::cout << "[" << parent << "] -> ";
-    //     for (auto vertex: face_vertices) {
-    //         std::cout << "(" << vertex << "), ";
-    //     }
-    //     std::cout << std::endl;
-    // }
-    // 5 edges connect the 6 faces, so the other 7 need to be steepest
-    ASSERT_EQ(steepestEdges.size(), 7);
-    // all six faces should be in tree
-    ASSERT_EQ(tree.children.size(), 6);
+    //for (auto edge: steepestEdges)
+    //{
+    //    std::cout << "Edge: (" << edge.first << "), (" << edge.second << ")" << std::endl;
+    //}
+    //for (auto[parent, face_vertices] : tree.children) {
+    //    std::cout << "[" << parent << "] -> ";
+    //    for (auto vertex: face_vertices) {
+    //        std::cout << "(" << vertex << "), ";
+    //    }
+    //    std::cout << std::endl;
+    //}
+    //verify
+    // one edge per vertex, except the maxZVertex
+    ASSERT_EQ(steepestEdges.size(), P.size_of_vertices() - 1);
+    // all faces should be in tree
+    ASSERT_EQ(tree.children.size(), P.size_of_facets());
     // the first edge of each entry cannot be one of the excluded edges, skipping the first entry
     for (size_t i = 1; i < tree.children.size(); i++)
     {
@@ -214,6 +209,30 @@ TEST(SteepestEdgeCutTest, Cube)
             }
         }
     }
+}
+
+TEST(SteepestEdgeCutTest, Cube)
+{
+    //setup
+    Polyhedron P;
+    std::ifstream(CGAL::data_file_path("meshes/cube_quad.off")) >> P;
+    Vector_3 normal(0.64486, -0.324763, -0.691871);
+    normal = normal / CGAL::approximate_sqrt(normal.squared_length());
+
+    //run DUT / verify
+    steepestEdgeCutTest(P, normal);
+}
+
+TEST(steepestEdgeCutTest, Iso)
+{
+    //setup
+    Polyhedron P;
+    std::ifstream(CGAL::data_file_path("meshes/icosahedron.off")) >> P;
+    Vector_3 normal(0.64486, -0.324763, -0.691871);
+    normal = normal / CGAL::approximate_sqrt(normal.squared_length());
+
+    //run DUT / verify
+    steepestEdgeCutTest(P, normal);
 }
 
 int main(int argc, char** argv) {
