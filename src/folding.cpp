@@ -321,3 +321,85 @@ SimpleTree2<std::vector<Point_3>> unfoldTree(const SimpleTree2<std::vector<Point
   }
   return unfoldedTree;
 }
+
+
+
+std::string treeToSVG(const SimpleTree2<std::vector<Point_3>> &tree)
+{
+  // extract crease edges
+  std::vector<std::pair<Point_3, Point_3>> creaseEdges;
+  for (size_t i = 1; i < tree.children.size(); i++)
+  {
+    size_t parent_idx = tree.children[i].first;
+    auto &face = tree.children[i].second;
+    if (face[0] < face[1]) {
+      creaseEdges.push_back({face[0], face[1]});
+    } else {
+      creaseEdges.push_back({face[1], face[0]});
+    }
+  }
+  // sort crease edges
+  std::sort(creaseEdges.begin(), creaseEdges.end());
+
+  std::vector<Point_3> outline;
+  // start the outline with a leaf node
+  for (size_t i = 1; i < tree.children[tree.children.size() - 1].second.size(); i++)
+  {
+    outline.push_back(tree.children[tree.children.size() - 1].second[i]);
+  }
+  find_point: while (outline[0] != outline[outline.size() - 1])
+  {
+    std::cout << "Outline size: " << outline.size() << std::endl;
+    auto &last = outline[outline.size() - 1];
+    for (auto &[parent, face] : tree.children)
+    {
+      for (size_t i = 0; i < face.size(); i++)
+      {
+        if (face[i] == last)
+        {
+          auto &next = face[(i + 1) % face.size()];
+          auto pair = (last < next) ? std::make_pair(last, next) : std::make_pair(next, last);
+          if (!std::binary_search(creaseEdges.begin(), creaseEdges.end(), pair))
+          {
+            std::cout << "Adding point " << next << std::endl;
+            outline.push_back(next);
+            goto find_point;
+          }
+        }
+      }
+    }
+  }
+
+  std::string result = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\">\n";
+  // add outline
+  result += "<polygon points=\"";
+  // for each point in the outline, add it to the svg as "x,y "
+  for (auto &point : outline)
+  {
+    result += std::to_string(point.x()) + "," + std::to_string(point.y()) + " ";
+  }
+  result += "\" fill=\"none\" stroke=\"red\" stroke-width=\"1\"/>\n";
+  for (auto &[point1, point2] : creaseEdges)
+  {
+    result += "<line x1=\"" + std::to_string(point1.x()) + "\" y1=\"" + std::to_string(point1.y()) + "\" x2=\"" + std::to_string(point2.x()) + "\" y2=\"" + std::to_string(point2.y()) + "\" stroke=\"black\" stroke-width=\"1\"/>\n";
+  }
+  // add crease edges
+  result += "</svg>";
+  return result;
+}
+
+std::string treeToSVG2(const SimpleTree2<std::vector<Point_3>> &tree)
+{
+  std::string result = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\">\n";
+  for (auto &[parent, face] : tree.children)
+  {
+    result += "<polygon points=\"";
+    for (auto &point : face)
+    {
+      result += std::to_string(point.x()) + "," + std::to_string(point.y()) + " ";
+    }
+    result += "\" fill=\"none\" stroke=\"black\" stroke-width=\"1\"/>\n";
+  }
+  result += "</svg>";
+  return result;
+}

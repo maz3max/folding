@@ -259,6 +259,41 @@ TEST(UnfoldTreeTest, Cube)
             ASSERT_LT(CGAL::squared_distance(plane, vertex), epsilon);
         }
     }
+    for (auto[parent, face_vertices] : unfolded.children) {
+        std::cout << "[" << parent << "] -> ";
+        for (auto vertex: face_vertices) {
+            std::cout << "(" << vertex << "), ";
+        }
+        std::cout << std::endl;
+    }
+    std::cout << treeToSVG(unfolded) << std::endl;
+}
+
+TEST(UnfoldTreeTest, Iso)
+{
+    //setup
+    Polyhedron P;
+    std::ifstream(CGAL::data_file_path("meshes/icosahedron.off")) >> P;
+    Vector_3 normal(0.64486, -0.324763, -0.691871);
+    normal = normal / CGAL::approximate_sqrt(normal.squared_length());
+
+    // run DUT
+    auto unfolded = unfoldTree(steepestEdgeCut(P, normal));
+
+    //verify
+    // all faces should be in tree
+    ASSERT_EQ(unfolded.children.size(), P.size_of_facets());
+
+    auto plane = Plane_3(Point_3(0, 0, 0), Vector_3(0, 0, -1));
+    // all points should be on the plane
+    for (auto[parent, face_vertices] : unfolded.children)
+    {
+        for (auto vertex : face_vertices)
+        {
+            ASSERT_LT(CGAL::squared_distance(plane, vertex), epsilon);
+        }
+    }
+    std::cout << treeToSVG2(unfolded) << std::endl;
 }
 
 int main(int argc, char** argv) {
