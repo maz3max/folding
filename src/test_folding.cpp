@@ -157,13 +157,14 @@ TEST(FindDownFacetTest, Tet)
     ASSERT_TRUE(std::find(vertices.begin(), vertices.end(), Point_3(0, 0, 1)) != vertices.end());
 }
 
+
 void steepestEdgeCutTest(const Polyhedron& P, const Vector_3& normal)
 {
     //run DUT
     auto maxZVertex = getFurthestVertex(P, -normal);
     auto steepestEdges = getSteepestEdges(P, normal, maxZVertex);
     auto startFacet = findDownFacet(P, Vector_3(0, 0, -1));
-    auto tree = constructSpanningTree(P, startFacet, steepestEdges);
+    auto [tree, vertices] = constructSpanningTree(P, startFacet, steepestEdges);
 
     //for (auto edge: steepestEdges)
     //{
@@ -178,13 +179,16 @@ void steepestEdgeCutTest(const Polyhedron& P, const Vector_3& normal)
     //}
     //verify
     // one edge per vertex, except the maxZVertex
+
     ASSERT_EQ(steepestEdges.size(), P.size_of_vertices() - 1);
     // all faces should be in tree
     ASSERT_EQ(tree.children.size(), P.size_of_facets());
     // the first edge of each entry cannot be one of the excluded edges, skipping the first entry
+
     for (size_t i = 1; i < tree.children.size(); i++)
     {
-        auto[parent, face_vertices] = tree.children[i];
+        auto[parent, face_vertic_indices] = tree.children[i];
+        Point_3 face_vertices[2] = {vertices[face_vertic_indices[0]], vertices[face_vertic_indices[1]]};
         ASSERT_TRUE(
             std::find(steepestEdges.begin(), steepestEdges.end(),
             std::make_pair(face_vertices[0], face_vertices[1])) == steepestEdges.end()
@@ -243,30 +247,34 @@ TEST(UnfoldTreeTest, Cube)
     Vector_3 normal(0.64486, -0.324763, -0.691871);
     normal = normal / CGAL::approximate_sqrt(normal.squared_length());
 
+    auto [tree, vertices] = steepestEdgeCut(P, normal);
+
     // run DUT
-    auto unfolded = unfoldTree(steepestEdgeCut(P, normal));
+    auto unfolded = unfoldTree(tree, vertices);
 
     //verify
     // all faces should be in tree
-    ASSERT_EQ(unfolded.children.size(), P.size_of_facets());
+    ASSERT_EQ(tree.children.size(), P.size_of_facets());
 
     auto plane = Plane_3(Point_3(0, 0, 0), Vector_3(0, 0, -1));
     // all points should be on the plane
-    for (auto[parent, face_vertices] : unfolded.children)
+    for (auto[parent, face_vertices] : tree.children)
     {
-        for (auto vertex : face_vertices)
+        for (size_t vertex_idx : face_vertices)
         {
+            Point_3 &vertex = unfolded[vertex_idx];
             ASSERT_LT(CGAL::squared_distance(plane, vertex), epsilon);
         }
     }
-    for (auto[parent, face_vertices] : unfolded.children) {
+    for (auto[parent, face_vertices] : tree.children) {
         std::cout << "[" << parent << "] -> ";
-        for (auto vertex: face_vertices) {
-            std::cout << "(" << vertex << "), ";
+        for (size_t vertex_idx : face_vertices)
+        {
+            std::cout << "(" << vertex_idx << "), ";
         }
         std::cout << std::endl;
     }
-    std::cout << treeToSVG(unfolded) << std::endl;
+    std::cout << treeToSVG2(tree, unfolded) << std::endl;
 }
 
 TEST(UnfoldTreeTest, Iso)
@@ -277,23 +285,34 @@ TEST(UnfoldTreeTest, Iso)
     Vector_3 normal(0.64486, -0.324763, -0.691871);
     normal = normal / CGAL::approximate_sqrt(normal.squared_length());
 
+    auto [tree, vertices] = steepestEdgeCut(P, normal);
+
     // run DUT
-    auto unfolded = unfoldTree(steepestEdgeCut(P, normal));
+    auto unfolded = unfoldTree(tree, vertices);
 
     //verify
     // all faces should be in tree
-    ASSERT_EQ(unfolded.children.size(), P.size_of_facets());
+    ASSERT_EQ(tree.children.size(), P.size_of_facets());
 
     auto plane = Plane_3(Point_3(0, 0, 0), Vector_3(0, 0, -1));
     // all points should be on the plane
-    for (auto[parent, face_vertices] : unfolded.children)
+    for (auto[parent, face_vertices] : tree.children)
     {
-        for (auto vertex : face_vertices)
+        for (size_t vertex_idx : face_vertices)
         {
+            Point_3 &vertex = unfolded[vertex_idx];
             ASSERT_LT(CGAL::squared_distance(plane, vertex), epsilon);
         }
     }
-    std::cout << treeToSVG2(unfolded) << std::endl;
+    for (auto[parent, face_vertices] : tree.children) {
+        std::cout << "[" << parent << "] -> ";
+        for (size_t vertex_idx : face_vertices)
+        {
+            std::cout << "(" << vertex_idx << "), ";
+        }
+        std::cout << std::endl;
+    }
+    std::cout << treeToSVG2(tree, unfolded) << std::endl;
 }
 
 int main(int argc, char** argv) {

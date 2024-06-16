@@ -110,6 +110,11 @@ Vector_3 getFaceNormal(const std::vector<Point_3> &face)
   return getThreePointNormal(face[0], face[1], face[2]);
 }
 
+Vector_3 getFaceNormal(const std::vector<size_t> &face, const std::vector<Point_3> &vertices)
+{
+  return getThreePointNormal(vertices[face[0]], vertices[face[1]], vertices[face[2]]);
+}
+
 // generate transfrom from one plane to another by rotating around a line segment
 Aff_transformation_3 getRotationAroundLineSegment(const Vector_3& currentNormal, const Vector_3& targetNormal, const Point_3& edgePoint)
 {
@@ -212,19 +217,42 @@ std::vector<Point_3> getFaceVertices(const Polyhedron::Halfedge_const_handle com
   return faceVertices;
 }
 
-SimpleTree2<std::vector<Point_3>> constructSpanningTree(
+std::vector<size_t> getFaceVertexIndices(const Polyhedron::Halfedge_const_handle commonEdge,
+const std::vector<Point_3> &vertices)
+{
+  Polyhedron::Halfedge_const_handle edge = commonEdge;
+  std::vector<size_t> faceVertices;
+  do
+  {
+    auto index = std::find(vertices.begin(), vertices.end(), edge->vertex()->point()) - vertices.begin();
+    faceVertices.push_back(index);
+    edge = edge->next();
+    assert(index < vertices.size());
+  } while (edge != commonEdge);
+  return faceVertices;
+}
+
+std::pair<SimpleTree2<std::vector<size_t>>, std::vector<Point_3>> constructSpanningTree(
   const Polyhedron &P,
   Polyhedron::Facet_const_handle startFace,
   std::vector<std::pair<Point_3, Point_3>> excludedEdges
 )
 {
-  SimpleTree2<std::vector<Point_3>> tree;
+  // create a list of all vertices
+  std::vector<Point_3> vertices;
+  for (auto &vertex : P.vertex_handles())
+  {
+    vertices.push_back(vertex->point());
+  }
+
+  SimpleTree2<std::vector<size_t>> tree;
   // todo list contains the index of the current node and the facet
   std::deque<std::pair<size_t, Polyhedron::Facet_const_handle>> todo{{0, startFace}};
   // visited facets
   std::set<Polyhedron::Facet_const_handle> visited{startFace};
   // add the first face to the tree (parent index, facet) (root is pointing to itself)
-  tree.children.push_back({0, getFaceVertices(startFace->halfedge())});
+  tree.children.push_back({0, getFaceVertexIndices(startFace->halfedge(), vertices)});
+
 
   while (todo.size() > 0)
   {
@@ -251,18 +279,18 @@ SimpleTree2<std::vector<Point_3>> constructSpanningTree(
       Polyhedron::Facet_const_handle neighbor = edgeIterator->opposite()->facet();
       if (visited.find(neighbor) == visited.end())
       {
-        tree.children.push_back({current_index, getFaceVertices(edgeIterator->opposite()->prev())});
+        tree.children.push_back({current_index, getFaceVertexIndices(edgeIterator->opposite()->prev(), vertices)});
         visited.insert(neighbor);
         todo.push_back({tree.children.size() - 1, neighbor});
       }
       edgeIterator = edgeIterator->next();
     } while (edgeIterator != currentFace->halfedge());
   }
-  return tree;
+  return {tree, vertices};
 }
 
 // The steepest edge cut tree contains the steepest edges of all vertices, except the vertex with maximal z-coordinate.
-SimpleTree2<std::vector<Point_3>> steepestEdgeCut(const Polyhedron &P, const Vector_3 normal)
+std::pair<SimpleTree2<std::vector<size_t>>, std::vector<Point_3>> steepestEdgeCut(const Polyhedron &P, const Vector_3 normal)
 {
   // Find the vertex with maximal z-coordinate
   auto maxZVertex = getFurthestVertex(P, -normal);
@@ -277,23 +305,21 @@ SimpleTree2<std::vector<Point_3>> steepestEdgeCut(const Polyhedron &P, const Vec
   return constructSpanningTree(P, downFacet, steepestEdges);
 }
 
-SimpleTree2<std::vector<Point_3>> unfoldTree(const SimpleTree2<std::vector<Point_3>> &tree)
+std::vector<Point_3> unfoldTree(const SimpleTree2<std::vector<size_t>> &tree, const std::vector<Point_3> &vertices)
 {
-  SimpleTree2<std::vector<Point_3>> unfoldedTree; unfoldedTree.children.reserve(tree.children.size());
   Aff_transformation_3 transformations[tree.children.size()];
+  std::vector<Point_3> transformedVertices(vertices.size());
 
   // set up initial transformation
   transformations[0] = getFallingDownTransformation(
-    tree.children[0].second[0],
-    getFaceNormal(tree.children[0].second),
+    vertices[tree.children[0].second[0]],
+    getFaceNormal(tree.children[0].second, vertices),
     Plane_3(Point_3(0, 0, 0), Vector_3(0, 0, -1))
   );
   // set up initial face
-  unfoldedTree.children.push_back({0, {}});
-  unfoldedTree.children[0].second.reserve(tree.children[0].second.size());
-  for (auto &point : tree.children[0].second)
+  for (size_t point_idx : tree.children[0].second)
   {
-    unfoldedTree.children[0].second.push_back(point.transform(transformations[0]));
+    transformedVertices[point_idx] = vertices[point_idx].transform(transformations[0]);
   }
 
   for (size_t i = 1; i< tree.children.size(); i++)
@@ -303,31 +329,26 @@ SimpleTree2<std::vector<Point_3>> unfoldTree(const SimpleTree2<std::vector<Point
     auto &face = tree.children[i].second;
     Aff_transformation_3 &parent_transform = transformations[parent_idx];
     transformations[i] = parent_transform * getRotationAroundLineSegment(
-      getFaceNormal(face),
-      getFaceNormal(tree.children[parent_idx].second),
-      face[0] // edge point, first two points are parent edge
+      getFaceNormal(face, vertices),
+      getFaceNormal(tree.children[parent_idx].second, vertices),
+      vertices[face[0]] // edge point, first two points are parent edge
     );
-    unfoldedTree.children.push_back({parent_idx, {}});
-    auto &transformed_face = unfoldedTree.children[i].second;
-    transformed_face.reserve(face.size());
-    // transform parent edge (double computation, but saves searching for the edge)
-    transformed_face.push_back(face[0].transform(parent_transform));
-    transformed_face.push_back(face[1].transform(parent_transform));
-    // transform remaining points
+    // transform non-parent points
     for (size_t j = 2; j < face.size(); j++)
     {
-      transformed_face.push_back(face[j].transform(transformations[i]));
+      size_t point_idx = face[j];
+      transformedVertices[point_idx] = vertices[point_idx].transform(transformations[i]);
     }
   }
-  return unfoldedTree;
+  return transformedVertices;
 }
 
 
 
-std::string treeToSVG(const SimpleTree2<std::vector<Point_3>> &tree)
+std::string treeToSVG(const SimpleTree2<std::vector<size_t>> &tree, const std::vector<Point_3> &vertices)
 {
   // extract crease edges
-  std::vector<std::pair<Point_3, Point_3>> creaseEdges;
+  std::vector<std::pair<size_t, size_t>> creaseEdges;
   for (size_t i = 1; i < tree.children.size(); i++)
   {
     size_t parent_idx = tree.children[i].first;
@@ -341,34 +362,45 @@ std::string treeToSVG(const SimpleTree2<std::vector<Point_3>> &tree)
   // sort crease edges
   std::sort(creaseEdges.begin(), creaseEdges.end());
 
-  std::vector<Point_3> outline;
-  // start the outline with a leaf node
-  for (size_t i = 1; i < tree.children[tree.children.size() - 1].second.size(); i++)
+  std::vector<std::pair<size_t, size_t>> outlineEdges;
+  for (auto &[parent, face] : tree.children)
   {
-    outline.push_back(tree.children[tree.children.size() - 1].second[i]);
-  }
-  find_point: while (outline[0] != outline[outline.size() - 1])
-  {
-    std::cout << "Outline size: " << outline.size() << std::endl;
-    auto &last = outline[outline.size() - 1];
-    for (auto &[parent, face] : tree.children)
+    for (size_t i = 0; i < face.size(); i++)
     {
-      for (size_t i = 0; i < face.size(); i++)
+      size_t point1 = face[i];
+      size_t point2 = face[(i + 1) % face.size()];
+      auto pair = (point1 < point2) ? std::make_pair(point1, point2) : std::make_pair(point2, point1);
+      if (!std::binary_search(creaseEdges.begin(), creaseEdges.end(), pair))
       {
-        if (face[i] == last)
-        {
-          auto &next = face[(i + 1) % face.size()];
-          auto pair = (last < next) ? std::make_pair(last, next) : std::make_pair(next, last);
-          if (!std::binary_search(creaseEdges.begin(), creaseEdges.end(), pair))
-          {
-            std::cout << "Adding point " << next << std::endl;
-            outline.push_back(next);
-            goto find_point;
-          }
-        }
+        outlineEdges.push_back(std::make_pair(point1, point2));
       }
     }
   }
+
+  for (auto &[point1, point2] : outlineEdges)
+  {
+    std::cout << "Outline edge: (" << point1 << ") -> (" << point2  << ")" << std::endl;
+  }
+
+  std::vector<size_t> outline;
+  // start the outline with a leaf node
+  outline.push_back(outlineEdges[0].first);
+  outline.push_back(outlineEdges[0].second);
+  outlineEdges.erase(outlineEdges.begin());
+  while (outlineEdges.size() > 0)
+  {
+    for (size_t i = 0; i < outlineEdges.size(); i++)
+    {
+      if (outline.back() == outlineEdges[i].first)
+      {
+        std::cout << "Adding edge " << outlineEdges[i].first << " -> " << outlineEdges[i].second << std::endl;
+        outline.push_back(outlineEdges[i].second);
+        outlineEdges.erase(outlineEdges.begin() + i);
+        break;
+      }
+    }
+  }
+
 
   std::string result = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\">\n";
   // add outline
@@ -376,30 +408,40 @@ std::string treeToSVG(const SimpleTree2<std::vector<Point_3>> &tree)
   // for each point in the outline, add it to the svg as "x,y "
   for (auto &point : outline)
   {
-    result += std::to_string(point.x()) + "," + std::to_string(point.y()) + " ";
+    result += std::to_string(vertices[point].x()) + "," + std::to_string(vertices[point].y()) + " ";
   }
   result += "\" fill=\"none\" stroke=\"red\" stroke-width=\"1\"/>\n";
   for (auto &[point1, point2] : creaseEdges)
   {
-    result += "<line x1=\"" + std::to_string(point1.x()) + "\" y1=\"" + std::to_string(point1.y()) + "\" x2=\"" + std::to_string(point2.x()) + "\" y2=\"" + std::to_string(point2.y()) + "\" stroke=\"black\" stroke-width=\"1\"/>\n";
+    result += "<line x1=\"" + std::to_string(vertices[point1].x()) + "\" y1=\"" + std::to_string(vertices[point1].y()) + "\" x2=\"" + std::to_string(vertices[point2].x()) + "\" y2=\"" + std::to_string(vertices[point2].y()) + "\" stroke=\"black\" stroke-width=\"1\"/>\n";
   }
   // add crease edges
   result += "</svg>";
   return result;
 }
 
-std::string treeToSVG2(const SimpleTree2<std::vector<Point_3>> &tree)
+std::string treeToSVG2(const SimpleTree2<std::vector<size_t>> &tree, const std::vector<Point_3> &vertices)
 {
-  std::string result = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\">\n";
+
+  std::vector<std::pair<size_t, size_t>> outlineEdges;
   for (auto &[parent, face] : tree.children)
   {
-    result += "<polygon points=\"";
-    for (auto &point : face)
+    for (size_t i = 0; i < face.size(); i++)
     {
-      result += std::to_string(point.x()) + "," + std::to_string(point.y()) + " ";
+      auto &point1 = face[i];
+      auto &point2 = face[(i + 1) % face.size()];
+      outlineEdges.push_back(std::make_pair(point1, point2));
     }
-    result += "\" fill=\"none\" stroke=\"black\" stroke-width=\"1\"/>\n";
   }
+
+
+  std::string result = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\">\n";
+  // add outline
+  for (auto &[point1, point2] : outlineEdges)
+  {
+    result += "<line x1=\"" + std::to_string(vertices[point1].x()) + "\" y1=\"" + std::to_string(vertices[point1].y()) + "\" x2=\"" + std::to_string(vertices[point2].x()) + "\" y2=\"" + std::to_string(vertices[point2].y()) + "\" stroke=\"red\" stroke-width=\"0.05\"/>\n";
+  }
+  // add crease edges
   result += "</svg>";
   return result;
 }
