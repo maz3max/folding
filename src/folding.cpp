@@ -277,6 +277,109 @@ SimpleTree2<std::vector<Point_3>> steepestEdgeCut(const Polyhedron &P, const Vec
   return constructSpanningTree(P, downFacet, steepestEdges);
 }
 
+SimpleTree2<std::vector<size_t>> convertTreeToIndexed(const Polyhedron &P, const SimpleTree2<std::vector<Point_3>> &tree)
+{
+  SimpleTree2<std::vector<size_t>> indexedTree;
+  std::vector<Point_3> vertices;
+  for (const Point_3 &vertex : P.points())
+  {
+    vertices.push_back(vertex);
+  }
+  for (auto &[parent, face] : tree.children)
+  {
+    indexedTree.children.push_back({parent, {}});
+    for (const Point_3 &vertex : face)
+    {
+      size_t index = std::find(vertices.begin(), vertices.end(), vertex) - vertices.begin();
+      assert(index < vertices.size());
+      indexedTree.children[indexedTree.children.size() - 1].second.push_back(index);
+    }
+  }
+  return indexedTree;
+}
+
+std::pair<std::vector<std::pair<size_t, size_t>>, std::vector<size_t>> findOutlineIndexed(
+  const SimpleTree2<std::vector<size_t>> &tree
+)
+{
+  // crease edges that are not cut and therefore not part of the outline (pairs of point indices)
+  std::vector<std::pair<size_t, size_t>> creaseEdges;
+  // outline edges (pairs of point indices)
+  std::vector<std::pair<size_t, size_t>> outlineEdges;
+  // pairs of indices: face index and index within face to define outline
+  std::vector<std::pair<size_t, size_t>> outline;
+  // index of the other edge in outline that was originally the same edge
+  std::vector<size_t> outlineCorrespondingEdge;
+
+  // find crease edges
+  for(size_t i = 1; i < tree.children.size(); i++)
+  {
+    size_t parent_idx = tree.children[i].first;
+    auto &face = tree.children[i].second;
+    creaseEdges.push_back((face[0] < face[1]) ? std::make_pair(face[0], face[1]) : std::make_pair(face[1], face[0]));
+  }
+  // find outline
+  for (auto &[parent, face] : tree.children)
+  {
+    for (size_t i = 0; i < face.size(); i++)
+    {
+      size_t current = face[i];
+      size_t next = face[(i + 1) % face.size()];
+      std::pair<size_t, size_t> edge = (current < next) ? std::make_pair(face[0], face[1]) : std::make_pair(face[1], face[0]);
+      if (!std::binary_search(creaseEdges.begin(), creaseEdges.end(), edge))
+      {
+        outlineEdges.push_back({current, next});
+      }
+    }
+  }
+  // sort outline
+  for (size_t i = 0; i < outlineEdges.size() - 2; i++)
+  {
+    if (outlineEdges[i].second == outlineEdges[i + 1].first)
+    {
+      continue;
+    }
+    for (size_t j = i + 2; j < outlineEdges.size(); j++)
+    {
+      if (outlineEdges[i].second == outlineEdges[j].first)
+      {
+        std::swap(outlineEdges[i + 1], outlineEdges[j]);
+        break;
+      }
+    }
+  }
+  // find pairs of outline edges that were originally the same edge
+  outlineCorrespondingEdge.resize(outlineEdges.size(), -1);
+  for (size_t i = 0; i < outlineEdges.size(); i++)
+  {
+    for (size_t j = 0; j < outlineEdges.size(); j++)
+    {
+      if (outlineEdges[i].first == outlineEdges[j].second && outlineEdges[i].second == outlineEdges[j].first)
+      {
+        outlineCorrespondingEdge[i] = j;
+        outlineCorrespondingEdge[j] = i;
+      }
+    }
+  }
+  // convert outline edges to outline
+  for (auto [first, second] : outlineEdges)
+  {
+    for (size_t i = 0; i < tree.children.size(); i++)
+    {
+      for (size_t j = 0; j < tree.children[i].second.size(); j++)
+      {
+        if (tree.children[i].second[j] == first
+            && tree.children[i].second[(j + 1) % tree.children[i].second.size()] == second)
+        {
+          outline.push_back({i, j});
+        }
+      }
+    }
+  }
+
+  return {outline, outlineCorrespondingEdge};
+}
+
 SimpleTree2<std::vector<Point_3>> unfoldTree(const SimpleTree2<std::vector<Point_3>> &tree)
 {
   SimpleTree2<std::vector<Point_3>> unfoldedTree; unfoldedTree.children.reserve(tree.children.size());
@@ -378,10 +481,10 @@ std::string treeToSVG(const SimpleTree2<std::vector<Point_3>> &tree)
   {
     result += std::to_string(point.x()) + "," + std::to_string(point.y()) + " ";
   }
-  result += "\" fill=\"none\" stroke=\"red\" stroke-width=\"1\"/>\n";
+  result += "\" fill=\"none\" stroke=\"red\" stroke-width=\"0.05\"/>\n";
   for (auto &[point1, point2] : creaseEdges)
   {
-    result += "<line x1=\"" + std::to_string(point1.x()) + "\" y1=\"" + std::to_string(point1.y()) + "\" x2=\"" + std::to_string(point2.x()) + "\" y2=\"" + std::to_string(point2.y()) + "\" stroke=\"black\" stroke-width=\"1\"/>\n";
+    result += "<line x1=\"" + std::to_string(point1.x()) + "\" y1=\"" + std::to_string(point1.y()) + "\" x2=\"" + std::to_string(point2.x()) + "\" y2=\"" + std::to_string(point2.y()) + "\" stroke=\"black\" stroke-width=\"0.05\"/>\n";
   }
   // add crease edges
   result += "</svg>";
@@ -398,7 +501,7 @@ std::string treeToSVG2(const SimpleTree2<std::vector<Point_3>> &tree)
     {
       result += std::to_string(point.x()) + "," + std::to_string(point.y()) + " ";
     }
-    result += "\" fill=\"none\" stroke=\"black\" stroke-width=\"1\"/>\n";
+    result += "\" fill=\"none\" stroke=\"black\" stroke-width=\"0.05\"/>\n";
   }
   result += "</svg>";
   return result;
