@@ -1,20 +1,24 @@
-#include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
+#include <CGAL/Simple_cartesian.h>
 #include <CGAL/Polyhedron_traits_with_normals_3.h>
 #include <CGAL/Polyhedron_incremental_builder_3.h>
 #include <CGAL/Polyhedron_3.h>
+#include <CGAL/Polygon_2.h>
 
 #include <CGAL/aff_transformation_tags.h>
 #include <CGAL/Aff_transformation_3.h>
 #include <algorithm>
 #include <iostream>
+#include <cstdlib>
 
-typedef CGAL::Exact_predicates_inexact_constructions_kernel Kernel;
+typedef CGAL::Simple_cartesian<double> Kernel;
+typedef Kernel::Point_2 Point_2;
 typedef Kernel::Point_3 Point_3;
 typedef Kernel::Plane_3 Plane_3;
 typedef Kernel::Vector_3 Vector_3;
 typedef Kernel::FT FT;
 typedef CGAL::Aff_transformation_3<Kernel> Aff_transformation_3;
 typedef CGAL::Polyhedron_3<Kernel> Polyhedron;
+typedef CGAL::Polygon_2<Kernel> Polygon;
 
 template <class T>
 struct SimpleTree
@@ -261,123 +265,50 @@ SimpleTree2<std::vector<Point_3>> constructSpanningTree(
   return tree;
 }
 
-// The steepest edge cut tree contains the steepest edges of all vertices, except the vertex with maximal z-coordinate.
-SimpleTree2<std::vector<Point_3>> steepestEdgeCut(const Polyhedron &P, const Vector_3 normal)
+bool doPolygonsIntersect(const Polygon &a, const Polygon &b)
 {
-  // Find the vertex with maximal z-coordinate
-  auto maxZVertex = getFurthestVertex(P, -normal);
-
-  // Find the steepest edge for each vertex
-  auto steepestEdges = getSteepestEdges(P, normal, maxZVertex);
-
-  // Find the facet that is facing down most
-  auto downFacet = findDownFacet(P, Vector_3(0, 0, -1));
-
-  // Construct the spanning tree
-  return constructSpanningTree(P, downFacet, steepestEdges);
+  for (size_t i = 0; i < a.size(); i++)
+  {
+    for (size_t j = 0; j < b.size(); j++)
+    {
+      if (CGAL::do_intersect(a.edge(i), b.edge(j)))
+      {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
-SimpleTree2<std::vector<size_t>> convertTreeToIndexed(const Polyhedron &P, const SimpleTree2<std::vector<Point_3>> &tree)
+bool treeContainsIntersection(const SimpleTree2<std::vector<Point_3>> &tree)
 {
-  SimpleTree2<std::vector<size_t>> indexedTree;
-  std::vector<Point_3> vertices;
-  for (const Point_3 &vertex : P.points())
-  {
-    vertices.push_back(vertex);
-  }
-  for (auto &[parent, face] : tree.children)
-  {
-    indexedTree.children.push_back({parent, {}});
-    for (const Point_3 &vertex : face)
+    std::vector<Polygon> faces;
+    for (auto &[parent, face] : tree.children)
     {
-      size_t index = std::find(vertices.begin(), vertices.end(), vertex) - vertices.begin();
-      assert(index < vertices.size());
-      indexedTree.children[indexedTree.children.size() - 1].second.push_back(index);
-    }
-  }
-  return indexedTree;
-}
-
-std::pair<std::vector<std::pair<size_t, size_t>>, std::vector<size_t>> findOutlineIndexed(
-  const SimpleTree2<std::vector<size_t>> &tree
-)
-{
-  // crease edges that are not cut and therefore not part of the outline (pairs of point indices)
-  std::vector<std::pair<size_t, size_t>> creaseEdges;
-  // outline edges (pairs of point indices)
-  std::vector<std::pair<size_t, size_t>> outlineEdges;
-  // pairs of indices: face index and index within face to define outline
-  std::vector<std::pair<size_t, size_t>> outline;
-  // index of the other edge in outline that was originally the same edge
-  std::vector<size_t> outlineCorrespondingEdge;
-
-  // find crease edges
-  for(size_t i = 1; i < tree.children.size(); i++)
-  {
-    size_t parent_idx = tree.children[i].first;
-    auto &face = tree.children[i].second;
-    creaseEdges.push_back((face[0] < face[1]) ? std::make_pair(face[0], face[1]) : std::make_pair(face[1], face[0]));
-  }
-  // find outline
-  for (auto &[parent, face] : tree.children)
-  {
-    for (size_t i = 0; i < face.size(); i++)
-    {
-      size_t current = face[i];
-      size_t next = face[(i + 1) % face.size()];
-      std::pair<size_t, size_t> edge = (current < next) ? std::make_pair(face[0], face[1]) : std::make_pair(face[1], face[0]);
-      if (!std::binary_search(creaseEdges.begin(), creaseEdges.end(), edge))
+      Polygon polygon;
+      for (auto &point : face)
       {
-        outlineEdges.push_back({current, next});
+        polygon.push_back(Point_2(point.x(), point.y()));
       }
+      faces.push_back(polygon);
     }
-  }
-  // sort outline
-  for (size_t i = 0; i < outlineEdges.size() - 2; i++)
-  {
-    if (outlineEdges[i].second == outlineEdges[i + 1].first)
+    // Check for intersections
+    for(size_t i = 0; i < faces.size(); i++)
     {
-      continue;
-    }
-    for (size_t j = i + 2; j < outlineEdges.size(); j++)
-    {
-      if (outlineEdges[i].second == outlineEdges[j].first)
+      for(size_t j = i + 1; j < faces.size(); j++)
       {
-        std::swap(outlineEdges[i + 1], outlineEdges[j]);
-        break;
-      }
-    }
-  }
-  // find pairs of outline edges that were originally the same edge
-  outlineCorrespondingEdge.resize(outlineEdges.size(), -1);
-  for (size_t i = 0; i < outlineEdges.size(); i++)
-  {
-    for (size_t j = 0; j < outlineEdges.size(); j++)
-    {
-      if (outlineEdges[i].first == outlineEdges[j].second && outlineEdges[i].second == outlineEdges[j].first)
-      {
-        outlineCorrespondingEdge[i] = j;
-        outlineCorrespondingEdge[j] = i;
-      }
-    }
-  }
-  // convert outline edges to outline
-  for (auto [first, second] : outlineEdges)
-  {
-    for (size_t i = 0; i < tree.children.size(); i++)
-    {
-      for (size_t j = 0; j < tree.children[i].second.size(); j++)
-      {
-        if (tree.children[i].second[j] == first
-            && tree.children[i].second[(j + 1) % tree.children[i].second.size()] == second)
+        if (tree.children[i].first == j || tree.children[j].first == i)
         {
-          outline.push_back({i, j});
+          /* adjacent faces are allowed to intersect */
+          continue;
+        }
+        if (doPolygonsIntersect(faces[i], faces[j]))
+        {
+          return true;
         }
       }
     }
-  }
-
-  return {outline, outlineCorrespondingEdge};
+    return false;
 }
 
 SimpleTree2<std::vector<Point_3>> unfoldTree(const SimpleTree2<std::vector<Point_3>> &tree)
@@ -427,58 +358,180 @@ SimpleTree2<std::vector<Point_3>> unfoldTree(const SimpleTree2<std::vector<Point
 
 
 
-std::string treeToSVG(const SimpleTree2<std::vector<Point_3>> &tree)
+// The steepest edge cut tree contains the steepest edges of all vertices, except the vertex with maximal z-coordinate.
+std::pair<SimpleTree2<std::vector<Point_3>>,SimpleTree2<std::vector<Point_3>>> steepestEdgeCut(const Polyhedron &P)
 {
-  // extract crease edges
-  std::vector<std::pair<Point_3, Point_3>> creaseEdges;
-  for (size_t i = 1; i < tree.children.size(); i++)
+  SimpleTree2<std::vector<Point_3>> tree;
+  SimpleTree2<std::vector<Point_3>> unfolded;
+  while (true) {
+    // generate new random normal vector
+    Vector_3 normal = Vector_3(std::rand(), std::rand(), std::rand());
+    normal /= CGAL::approximate_sqrt(normal.squared_length());
+
+    // Find the vertex with maximal z-coordinate
+    auto maxZVertex = getFurthestVertex(P, -normal);
+
+    // Find the steepest edge for each vertex
+    auto steepestEdges = getSteepestEdges(P, normal, maxZVertex);
+
+    // Find the facet that is facing down most
+    auto downFacet = findDownFacet(P, Vector_3(0, 0, -1));
+    // Construct the spanning tree
+    tree = constructSpanningTree(P, downFacet, steepestEdges);
+    // Unfold the tree
+    unfolded = unfoldTree(tree);
+
+    if (0)//(treeContainsIntersection(unfolded))
+    {
+      std::cout << "Found intersection, retrying" << std::endl;
+    } else {
+      break;
+    }
+  }
+  return {tree, unfolded};
+}
+
+SimpleTree2<std::vector<size_t>> convertTreeToIndexed(const Polyhedron &P, const SimpleTree2<std::vector<Point_3>> &tree)
+{
+  SimpleTree2<std::vector<size_t>> indexedTree;
+  std::vector<Point_3> vertices;
+  for (const Point_3 &vertex : P.points())
+  {
+    vertices.push_back(vertex);
+  }
+  for (auto &[parent, face] : tree.children)
+  {
+    indexedTree.children.push_back({parent, {}});
+    for (const Point_3 &vertex : face)
+    {
+      size_t index = std::find(vertices.begin(), vertices.end(), vertex) - vertices.begin();
+      assert(index < vertices.size());
+      indexedTree.children[indexedTree.children.size() - 1].second.push_back(index);
+    }
+  }
+  return indexedTree;
+}
+
+std::pair<std::vector<std::pair<size_t, size_t>>, std::vector<size_t>> findOutlineIndexed(
+  const SimpleTree2<std::vector<size_t>> &tree
+)
+{
+  // crease edges that are not cut and therefore not part of the outline (pairs of point indices)
+  std::vector<std::pair<size_t, size_t>> creaseEdges;
+  // outline edges (pairs of point indices)
+  std::vector<std::pair<size_t, size_t>> outlineEdges;
+  // pairs of indices: face index and index within face to define outline
+  std::vector<std::pair<size_t, size_t>> outline;
+  // index of the other edge in outline that was originally the same edge
+  std::vector<size_t> outlineCorrespondingEdge;
+
+  // find crease edges
+  for(size_t i = 1; i < tree.children.size(); i++)
   {
     size_t parent_idx = tree.children[i].first;
     auto &face = tree.children[i].second;
-    if (face[0] < face[1]) {
-      creaseEdges.push_back({face[0], face[1]});
-    } else {
-      creaseEdges.push_back({face[1], face[0]});
-    }
+    creaseEdges.push_back((face[0] < face[1]) ? std::make_pair(face[0], face[1]) : std::make_pair(face[1], face[0]));
   }
   // sort crease edges
   std::sort(creaseEdges.begin(), creaseEdges.end());
 
-  std::vector<Point_3> outline;
-  // start the outline with a leaf node
-  for (size_t i = 1; i < tree.children[tree.children.size() - 1].second.size(); i++)
+  // find outline
+  for (auto &[parent, face] : tree.children)
   {
-    outline.push_back(tree.children[tree.children.size() - 1].second[i]);
-  }
-  find_point: while (outline[0] != outline[outline.size() - 1])
-  {
-    std::cout << "Outline size: " << outline.size() << std::endl;
-    auto &last = outline[outline.size() - 1];
-    for (auto &[parent, face] : tree.children)
+    for (size_t i = 0; i < face.size(); i++)
     {
-      for (size_t i = 0; i < face.size(); i++)
+      size_t current = face[i];
+      size_t next = face[(i + 1) % face.size()];
+      std::pair<size_t, size_t> edge = (current < next) ? std::make_pair(face[0], face[1]) : std::make_pair(face[1], face[0]);
+      if (!std::binary_search(creaseEdges.begin(), creaseEdges.end(), edge))
       {
-        if (face[i] == last)
+        outlineEdges.push_back({current, next});
+      }
+    }
+  }
+  //print outline edges
+  for (auto [first, second] : outlineEdges)
+  {
+    std::cout << first << " " << second << std::endl;
+  }
+
+  // sort outline
+  for (size_t i = 0; i < outlineEdges.size() - 2; i++)
+  {
+    if (outlineEdges[i].second == outlineEdges[i + 1].first)
+    {
+      continue;
+    }
+    for (size_t j = i + 2; j < outlineEdges.size(); j++)
+    {
+      if (outlineEdges[i].second == outlineEdges[j].first)
+      {
+        std::swap(outlineEdges[i + 1], outlineEdges[j]);
+        break;
+      }
+    }
+  }
+
+  //print outline edges
+  for (auto [first, second] : outlineEdges)
+  {
+    std::cout << first << " " << second << std::endl;
+  }
+
+  // find pairs of outline edges that were originally the same edge
+  outlineCorrespondingEdge.resize(outlineEdges.size(), -1);
+  for (size_t i = 0; i < outlineEdges.size(); i++)
+  {
+    for (size_t j = 0; j < outlineEdges.size(); j++)
+    {
+      if (outlineEdges[i].first == outlineEdges[j].second && outlineEdges[i].second == outlineEdges[j].first)
+      {
+        outlineCorrespondingEdge[i] = j;
+        outlineCorrespondingEdge[j] = i;
+      }
+    }
+  }
+  // convert outline edges to outline
+  for (auto [first, second] : outlineEdges)
+  {
+    for (size_t i = 0; i < tree.children.size(); i++)
+    {
+      for (size_t j = 0; j < tree.children[i].second.size(); j++)
+      {
+        if (tree.children[i].second[j] == first
+            && tree.children[i].second[(j + 1) % tree.children[i].second.size()] == second)
         {
-          auto &next = face[(i + 1) % face.size()];
-          auto pair = (last < next) ? std::make_pair(last, next) : std::make_pair(next, last);
-          if (!std::binary_search(creaseEdges.begin(), creaseEdges.end(), pair))
-          {
-            std::cout << "Adding point " << next << std::endl;
-            outline.push_back(next);
-            goto find_point;
-          }
+          outline.push_back({i, j});
         }
       }
     }
   }
 
+  return {outline, outlineCorrespondingEdge};
+}
+
+
+
+std::string treeToSVG(const Polyhedron &P, const SimpleTree2<std::vector<Point_3>> &tree, const SimpleTree2<std::vector<Point_3>> &unfolded)
+{
+  // extract crease edges
+  std::vector<std::pair<Point_3, Point_3>> creaseEdges;
+  for (size_t i = 1; i < unfolded.children.size(); i++)
+  {
+    size_t parent_idx = unfolded.children[i].first;
+    auto &face = unfolded.children[i].second;
+    creaseEdges.push_back({face[0], face[1]});
+  }
+
+  auto [outline, outlineCorrespondingEdge] = findOutlineIndexed(convertTreeToIndexed(P, tree));
+
   std::string result = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\">\n";
   // add outline
   result += "<polygon points=\"";
   // for each point in the outline, add it to the svg as "x,y "
-  for (auto &point : outline)
+  for (auto [faceIdx, pointIdx] : outline)
   {
+    Point_3 point = unfolded.children[faceIdx].second[pointIdx];
     result += std::to_string(point.x()) + "," + std::to_string(point.y()) + " ";
   }
   result += "\" fill=\"none\" stroke=\"red\" stroke-width=\"0.05\"/>\n";

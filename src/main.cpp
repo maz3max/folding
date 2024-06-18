@@ -2,12 +2,10 @@
 #include <CGAL/Polyhedron_3.h>
 #include <CGAL/IO/Polyhedron_iostream.h>
 #include <CGAL/IO/VRML.h>
-#include <CGAL/draw_polyhedron.h>
 #include <fstream>
 
 #include "folding.cpp"
 
-typedef CGAL::Exact_predicates_inexact_constructions_kernel Kernel;
 typedef CGAL::Polyhedron_3<Kernel> Polyhedron;
 
 /*

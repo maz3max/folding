@@ -164,7 +164,6 @@ void steepestEdgeCutTest(const Polyhedron& P, const Vector_3& normal)
     auto steepestEdges = getSteepestEdges(P, normal, maxZVertex);
     auto startFacet = findDownFacet(P, Vector_3(0, 0, -1));
     auto tree = constructSpanningTree(P, startFacet, steepestEdges);
-
     //for (auto edge: steepestEdges)
     //{
     //    std::cout << "Edge: (" << edge.first << "), (" << edge.second << ")" << std::endl;
@@ -244,7 +243,8 @@ TEST(UnfoldTreeTest, Cube)
     normal = normal / CGAL::approximate_sqrt(normal.squared_length());
 
     // run DUT
-    auto unfolded = unfoldTree(steepestEdgeCut(P, normal));
+    std::srand(0);
+    auto [tree, unfolded] = steepestEdgeCut(P);
 
     //verify
     // all faces should be in tree
@@ -259,14 +259,8 @@ TEST(UnfoldTreeTest, Cube)
             ASSERT_LT(CGAL::squared_distance(plane, vertex), epsilon);
         }
     }
-    for (auto[parent, face_vertices] : unfolded.children) {
-        std::cout << "[" << parent << "] -> ";
-        for (auto vertex: face_vertices) {
-            std::cout << "(" << vertex << "), ";
-        }
-        std::cout << std::endl;
-    }
-    std::cout << treeToSVG(unfolded) << std::endl;
+
+    std::cout << treeToSVG(P, tree, unfolded) << std::endl;
 }
 
 TEST(UnfoldTreeTest, Iso)
@@ -278,7 +272,8 @@ TEST(UnfoldTreeTest, Iso)
     normal = normal / CGAL::approximate_sqrt(normal.squared_length());
 
     // run DUT
-    auto unfolded = unfoldTree(steepestEdgeCut(P, normal));
+    std::srand(0);
+    auto [tree, unfolded] = steepestEdgeCut(P);
 
     //verify
     // all faces should be in tree
@@ -293,7 +288,8 @@ TEST(UnfoldTreeTest, Iso)
             ASSERT_LT(CGAL::squared_distance(plane, vertex), epsilon);
         }
     }
-    std::cout << treeToSVG2(unfolded) << std::endl;
+
+    std::cout << treeToSVG(P, tree, unfolded) << std::endl;
 }
 
 int main(int argc, char** argv) {
